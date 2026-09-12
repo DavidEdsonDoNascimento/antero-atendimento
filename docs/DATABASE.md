@@ -92,6 +92,71 @@ os dados operacionais da própria organização via
 toda escrita chega por função restrita, começando pela ingestão atômica da
 Etapa 3. `owner`, `admin` e `attendant` não são diferenciados na leitura.
 
+## Tabelas do Ciclo 2 (Etapa 3 — ingestão atômica)
+
+Nenhuma tabela nova. `contacts`, `conversations` e `messages` continuam sem
+política de INSERT/UPDATE/DELETE (0004_atendimento_rls.sql). A única porta de
+escrita destas três tabelas é a função `security definer`
+`ingest_inbound_message`, criada em `0005_ingest_inbound_message.sql`:
+
+```sql
+ingest_inbound_message(
+  p_whatsapp_account_id uuid,
+  p_phone_number text,
+  p_content text,
+  p_external_message_id text,
+  p_contact_name text default null
+) returns table (
+  organization_id uuid,
+  contact_id uuid,
+  conversation_id uuid,
+  message_id uuid,
+  created boolean,
+  duplicate boolean,
+  reopened boolean
+)
+```
+
+Recebe apenas o mínimo do chamador — nunca `organization_id`,
+`conversation_id`, status, `direction`, `sender_type`, timestamps ou
+`sender_user_id`. `organization_id` é sempre derivado de
+`whatsapp_accounts.id`; os demais campos da mensagem são fixos
+(`direction = 'inbound'`, `sender_type = 'contact'`, `sender_user_id = null`,
+`message_type = 'text'`, `delivery_status = 'delivered'` — a mensagem já
+chegou por completo, não há "envio" a confirmar do nosso lado).
+
+Validado dentro da função, nesta ordem: usuário autenticado; conta existente
+e ativa (`whatsapp_accounts.status = 'connected'` — não existe valor
+`'active'` neste enum); provider `development` (não existe valor `'dev'` — só
+contas de desenvolvimento podem receber ingestão nesta etapa, antes da
+integração real com a Meta); chamador é `owner`/`admin` ativo da organização
+derivada (`is_org_admin`); telefone em E.164; conteúdo, após `trim`, não
+vazio e até 4096 caracteres; `external_message_id` obrigatório e não vazio.
+
+Contato e conversa são localizados ou criados com
+`insert ... on conflict (...) do nothing returning ... into`, nunca com
+"verificar e depois inserir": a UNIQUE de cada tabela decide sozinha quem
+vence uma criação concorrente, e um `select` subsequente busca a linha
+vencedora quando a própria inserção não retorna nada. Entregas duplicadas
+nunca alteram um contato existente (não há UPDATE de `name` no caminho de
+"contato já existe").
+
+Idempotência de mensagem: a autoridade final é a UNIQUE PARTIAL INDEX
+`messages_whatsapp_account_external_id_key` (Etapa 1). O INSERT da mensagem
+usa `on conflict (whatsapp_account_id, external_message_id) ... do nothing`;
+quando o conflito ocorre, a função busca a mensagem já persistida e retorna
+`duplicate = true` sem tocar em conversa, contato ou status —
+`created`/`duplicate` nunca são `true` ao mesmo tempo.
+
+Reabertura: uma mensagem nova (não duplicata) para uma conversa `resolved`
+reabre a MESMA linha (`status = 'waiting'`, `resolved_at = null`, atribuição
+anterior limpa) e retorna `reopened = true`; para conversas `waiting`,
+`human`, `bot` ou recém-criadas, apenas `last_message_at` avança. Antes de
+decidir reabrir uma conversa pré-existente, a função trava a linha com
+`select ... for update`, serializando duas mensagens novas concorrentes para
+a mesma conversa `resolved` — só a primeira reabre; a segunda já enxerga
+`waiting`.
+
 ## Decisão sobre `organization_id`
 
 Tabelas de negócio carregam `organization_id` **direto** quando isso simplifica
