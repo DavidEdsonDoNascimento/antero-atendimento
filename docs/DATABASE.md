@@ -85,8 +85,12 @@ pai por **foreign key composta** — não apenas por RLS. Isso impede
 estruturalmente que uma linha filha combine o `organization_id` de uma
 organização com uma entidade pai (contato, conta ou conversa) de outra.
 
-RLS está **habilitado** nas três tabelas desde a Etapa 1, mas ainda **sem
-políticas nem grants** — elas ficam inacessíveis pela API até a Etapa 2.
+RLS está **habilitado** nas três tabelas desde a Etapa 1. Desde a Etapa 2
+(ver "Políticas de RLS" abaixo), um membro ativo da organização pode **ler**
+os dados operacionais da própria organização via
+`is_org_member(organization_id)`. Não há política de INSERT/UPDATE/DELETE —
+toda escrita chega por função restrita, começando pela ingestão atômica da
+Etapa 3. `owner`, `admin` e `attendant` não são diferenciados na leitura.
 
 ## Decisão sobre `organization_id`
 
@@ -125,6 +129,13 @@ totalmente qualificadas.
 | organizations | membro, admin plataforma | admin plataforma | admin da org, admin plataforma | admin plataforma |
 | organization_members | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
 | whatsapp_accounts | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
+| contacts | membro ativo da org | — | — | — |
+| conversations | membro ativo da org | — | — | — |
+| messages | membro ativo da org | — | — | — |
+
+`—` nas três tabelas do Ciclo 2 significa "sem política": nenhum papel
+escreve direto por INSERT/UPDATE/DELETE via API. A escrita chega por função
+restrita (Etapa 3 em diante).
 
 Garantias exigidas e atendidas:
 
@@ -134,6 +145,10 @@ Garantias exigidas e atendidas:
 - Usuário não autenticado não acessa nada (sem sessão, `auth.uid()` é nulo).
 - O cliente não consegue “forjar” outro `organization_id`: as políticas checam a
   associação real no banco, não um valor enviado pelo frontend.
+- `contacts`, `conversations` e `messages` **não** concedem leitura a
+  `is_platform_admin()`: administração da plataforma é distinta de pertencer
+  à organização, e o conteúdo de conversas e mensagens de clientes é
+  sensível.
 
 ## Administrador da plataforma vs. proprietário
 
