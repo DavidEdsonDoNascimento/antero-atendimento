@@ -11,10 +11,14 @@ focada e o RLS coerente.
 
 | Ciclo | Tabelas |
 |------|---------|
-| **1 (atual)** | `profiles`, `organizations`, `organization_members`, `whatsapp_accounts` |
-| 2 | `contacts`, `conversations`, `messages`, `conversation_assignments` |
+| 1 | `profiles`, `organizations`, `organization_members`, `whatsapp_accounts` |
+| **2 (atual)** | `contacts`, `conversations`, `messages` |
 | 3 | `flows`, `flow_steps`, `flow_options`, `flow_sessions`, `captured_answers` |
 | 4 | `webhook_events` |
+
+`conversation_assignments` foi avaliada e postergada: `conversations.assigned_user_id`
++ `assigned_at` cobrem a atribuição de atendente do Ciclo 2 sem precisar de uma
+tabela de histórico ainda sem consumidor.
 
 ## Tabelas do Ciclo 1
 
@@ -37,6 +41,53 @@ organizações no futuro; no MVP a interface usa a primeira associação ativa.
 Canal por organização: `provider` (`development`/`cloud_api`),
 `external_account_id`, `phone_number`, `display_name`, `status`.
 
+## Tabelas do Ciclo 2 (Etapa 1 — schema fundamental)
+
+### contacts
+**Identidade organizacional.** Identifica um cliente pelo telefone dentro da
+organização, independente de canal — chave de identidade:
+`(organization_id, phone_number)`. O telefone é normalizado em E.164 pela
+aplicação antes de persistir; o banco valida apenas o formato final.
+
+### conversations
+Representa a thread de um contato **em uma conta/canal específico** — não
+apenas por contato. Unicidade permanente em `(organization_id,
+whatsapp_account_id, contact_id)`: o mesmo contato pode ter uma conversa por
+número da organização (ex.: fala com o número comercial e, separadamente,
+com o número de suporte) sem misturar canal, histórico ou rota de resposta.
+Uma mensagem recebida para uma conversa `resolved` reabre a mesma linha
+(Etapa 3) quando vem do mesmo contato **pela mesma conta**; se a mensagem
+chegar por outra conta da organização, gera uma conversa diferente (nova
+linha, não reaproveitamento). Estados (`conversation_status`): `bot`,
+`waiting`, `human`, `resolved`. "Conversa aberta" não é um estado — é o
+agregado `status <> 'resolved'`. O default do status é `waiting`: o Ciclo 2
+ainda não tem motor de automação (Ciclo 3), então toda conversa nova já
+nasce aguardando atendimento humano. Atribuição de atendente é opcional
+(`assigned_user_id` + `assigned_at`); `conversation_assignments` (histórico
+de atribuições) foi avaliada e postergada — ver tabela de ciclos acima.
+`unread_count` também foi postergado, por não ter consumidor no Ciclo 2.
+
+### messages
+Histórico imutável (sem UPDATE/DELETE) de uma conversa. `direction`
+(`inbound`/`outbound`), `sender_type` (`contact`/`bot`/`user`/`system`) e
+`message_type` (`text` por enquanto) descrevem a mensagem;
+`external_message_id` é opcional e identifica a mensagem no provedor.
+Ordenação estável via `(created_at, id)`. A foreign key para `conversations`
+é **tripla** — `(organization_id, conversation_id, whatsapp_account_id)` —
+para provar que a conta gravada na mensagem é exatamente a conta já
+registrada na conversa, não apenas uma conta válida da mesma organização.
+Isso torna desnecessária uma foreign key separada para `whatsapp_accounts`:
+a própria `conversations` já garante (com `ON DELETE RESTRICT`) que seu
+`whatsapp_account_id` aponta para uma conta real da mesma organização.
+
+Todas as três tabelas carregam `organization_id` e referenciam sua entidade
+pai por **foreign key composta** — não apenas por RLS. Isso impede
+estruturalmente que uma linha filha combine o `organization_id` de uma
+organização com uma entidade pai (contato, conta ou conversa) de outra.
+
+RLS está **habilitado** nas três tabelas desde a Etapa 1, mas ainda **sem
+políticas nem grants** — elas ficam inacessíveis pela API até a Etapa 2.
+
 ## Decisão sobre `organization_id`
 
 Tabelas de negócio carregam `organization_id` **direto** quando isso simplifica
@@ -48,8 +99,10 @@ tornar o RLS simples e rápido.
 ## Enums
 
 `organization_status`, `member_role`, `member_status`, `whatsapp_provider`,
-`whatsapp_status`. Enums foram escolhidos por trazerem clareza; adicionar novos
-valores (ex.: outro provedor) é feito com `alter type ... add value`.
+`whatsapp_status` (Ciclo 1); `conversation_status`, `message_direction`,
+`message_sender`, `message_type`, `message_delivery_status` (Ciclo 2). Enums
+foram escolhidos por trazerem clareza; adicionar novos valores (ex.: outro
+provedor) é feito com `alter type ... add value`.
 
 ## Funções auxiliares (autorização)
 
@@ -89,7 +142,12 @@ distinto do papel `owner` de uma organização. A verificação é feita no serv
 (DAL + RLS). A Antero é uma organização comum; o poder de plataforma vem apenas
 desta flag.
 
-## Idempotência (preparação para webhook)
+## Idempotência
 
-O Ciclo 4 adicionará `messages.external_message_id` e `webhook_events` com
-identificadores externos únicos, para descartar entregas duplicadas do webhook.
+`messages.external_message_id` existe desde o Ciclo 2, é opcional e único
+por canal — índice único parcial em `(whatsapp_account_id,
+external_message_id)` onde `external_message_id is not null`. O escopo é o
+canal, não a organização: duas contas de WhatsApp são fluxos de entrega
+independentes, e um id externo de uma conta não deveria bloquear o mesmo id
+em outra conta da mesma organização. O Ciclo 4 adicionará `webhook_events`
+com o mesmo propósito do lado do webhook real da Meta.
