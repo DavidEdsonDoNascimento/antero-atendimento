@@ -15,6 +15,16 @@ export type MemberRole = "owner" | "admin" | "attendant";
 export type MemberStatus = "active" | "invited" | "disabled";
 export type WhatsappProvider = "development" | "cloud_api";
 export type WhatsappStatus = "connected" | "disconnected";
+export type ConversationStatus = "bot" | "waiting" | "human" | "resolved";
+export type MessageDirection = "inbound" | "outbound";
+export type MessageSender = "contact" | "bot" | "user" | "system";
+export type MessageType = "text";
+export type MessageDeliveryStatus =
+  | "pending"
+  | "sent"
+  | "delivered"
+  | "read"
+  | "failed";
 
 export type Database = {
   public: {
@@ -156,6 +166,162 @@ export type Database = {
           },
         ];
       };
+      contacts: {
+        Row: {
+          id: string;
+          organization_id: string;
+          name: string | null;
+          phone_number: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          name?: string | null;
+          phone_number: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          name?: string | null;
+          phone_number?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "contacts_organization_id_fkey";
+            columns: ["organization_id"];
+            referencedRelation: "organizations";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      conversations: {
+        Row: {
+          id: string;
+          organization_id: string;
+          whatsapp_account_id: string;
+          contact_id: string;
+          status: ConversationStatus;
+          assigned_user_id: string | null;
+          assigned_at: string | null;
+          started_at: string;
+          last_message_at: string;
+          resolved_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          whatsapp_account_id: string;
+          contact_id: string;
+          status?: ConversationStatus;
+          assigned_user_id?: string | null;
+          assigned_at?: string | null;
+          started_at?: string;
+          last_message_at?: string;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          whatsapp_account_id?: string;
+          contact_id?: string;
+          status?: ConversationStatus;
+          assigned_user_id?: string | null;
+          assigned_at?: string | null;
+          started_at?: string;
+          last_message_at?: string;
+          resolved_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "conversations_whatsapp_account_id_fkey";
+            columns: ["organization_id", "whatsapp_account_id"];
+            referencedRelation: "whatsapp_accounts";
+            referencedColumns: ["organization_id", "id"];
+          },
+          {
+            foreignKeyName: "conversations_contact_id_fkey";
+            columns: ["organization_id", "contact_id"];
+            referencedRelation: "contacts";
+            referencedColumns: ["organization_id", "id"];
+          },
+          {
+            foreignKeyName: "conversations_assigned_user_id_fkey";
+            columns: ["organization_id", "assigned_user_id"];
+            referencedRelation: "organization_members";
+            referencedColumns: ["organization_id", "user_id"];
+          },
+        ];
+      };
+      messages: {
+        Row: {
+          id: string;
+          organization_id: string;
+          conversation_id: string;
+          whatsapp_account_id: string;
+          external_message_id: string | null;
+          direction: MessageDirection;
+          sender_type: MessageSender;
+          sender_user_id: string | null;
+          message_type: MessageType;
+          content: string;
+          delivery_status: MessageDeliveryStatus;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          organization_id: string;
+          conversation_id: string;
+          whatsapp_account_id: string;
+          external_message_id?: string | null;
+          direction: MessageDirection;
+          sender_type: MessageSender;
+          sender_user_id?: string | null;
+          message_type?: MessageType;
+          content: string;
+          delivery_status?: MessageDeliveryStatus;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          organization_id?: string;
+          conversation_id?: string;
+          whatsapp_account_id?: string;
+          external_message_id?: string | null;
+          direction?: MessageDirection;
+          sender_type?: MessageSender;
+          sender_user_id?: string | null;
+          message_type?: MessageType;
+          content?: string;
+          delivery_status?: MessageDeliveryStatus;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "messages_conversation_whatsapp_account_fkey";
+            columns: ["organization_id", "conversation_id", "whatsapp_account_id"];
+            referencedRelation: "conversations";
+            referencedColumns: ["organization_id", "id", "whatsapp_account_id"];
+          },
+          {
+            foreignKeyName: "messages_sender_user_id_fkey";
+            columns: ["organization_id", "sender_user_id"];
+            referencedRelation: "organization_members";
+            referencedColumns: ["organization_id", "user_id"];
+          },
+        ];
+      };
     };
     Views: Record<never, never>;
     Functions: {
@@ -182,6 +348,11 @@ export type Database = {
       member_status: MemberStatus;
       whatsapp_provider: WhatsappProvider;
       whatsapp_status: WhatsappStatus;
+      conversation_status: ConversationStatus;
+      message_direction: MessageDirection;
+      message_sender: MessageSender;
+      message_type: MessageType;
+      message_delivery_status: MessageDeliveryStatus;
     };
     CompositeTypes: Record<never, never>;
   };
@@ -194,3 +365,7 @@ export type OrganizationMember =
 export type Profile = Database["public"]["Tables"]["profiles"]["Row"];
 export type WhatsappAccount =
   Database["public"]["Tables"]["whatsapp_accounts"]["Row"];
+export type Contact = Database["public"]["Tables"]["contacts"]["Row"];
+export type Conversation =
+  Database["public"]["Tables"]["conversations"]["Row"];
+export type Message = Database["public"]["Tables"]["messages"]["Row"];
