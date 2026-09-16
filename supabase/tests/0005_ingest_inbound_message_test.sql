@@ -28,7 +28,7 @@
 -- escopo desta etapa por não estar instalado no projeto.
 
 BEGIN;
-SELECT plan(60);
+SELECT plan(69);
 
 -- ---------------------------------------------------------------------------
 -- Auditoria estática: a autoridade contra duplicidade é a constraint, não
@@ -285,6 +285,60 @@ SELECT ok(
     ) x WHERE created AND duplicate
   ),
   'created e duplicate nunca são true ao mesmo tempo'
+);
+
+-- ---------------------------------------------------------------------------
+-- 4b) Payload divergente no mesmo (conta, external_message_id): telefone,
+-- nome e conteúdo diferentes do original. Deve devolver a mensagem original
+-- como duplicata SEM criar contato/conversa para o telefone novo e SEM
+-- alterar o contato/conversa originais. Reproduz o cenário do relatório de
+-- correção pontual da Etapa 3.
+-- ---------------------------------------------------------------------------
+CREATE TEMP TABLE original_contact_snapshot AS
+SELECT id, organization_id, name, phone_number, updated_at
+FROM public.contacts WHERE id = (SELECT contact_id FROM r1);
+
+CREATE TEMP TABLE original_conversation_snapshot AS
+SELECT id, status, assigned_user_id, assigned_at, resolved_at, last_message_at, updated_at
+FROM public.conversations WHERE id = (SELECT conversation_id FROM r1);
+
+CREATE TEMP TABLE r4b AS
+SELECT * FROM public.ingest_inbound_message(
+  p_whatsapp_account_id => (SELECT v FROM ids WHERE k = 'account_a1'),
+  p_phone_number => '+5511999990088',
+  p_content => 'conteúdo completamente diferente do original',
+  p_external_message_id => 'wa-msg-002',
+  p_contact_name => 'Cliente Divergente'
+);
+
+SELECT is((SELECT message_id FROM r4b), (SELECT message_id FROM r2), 'payload divergente: retorna o message_id ORIGINAL, não cria outro');
+SELECT is((SELECT created FROM r4b), false, 'payload divergente: created = false');
+SELECT is((SELECT duplicate FROM r4b), true, 'payload divergente: duplicate = true');
+SELECT is((SELECT reopened FROM r4b), false, 'payload divergente: reopened = false');
+SELECT is(
+  (SELECT count(*)::int FROM public.messages WHERE whatsapp_account_id = (SELECT v FROM ids WHERE k = 'account_a1') AND external_message_id = 'wa-msg-002'),
+  1,
+  'payload divergente: continua existindo exatamente 1 mensagem para o external_message_id'
+);
+SELECT is(
+  (SELECT count(*)::int FROM public.contacts WHERE organization_id = (SELECT v FROM ids WHERE k = 'org_a') AND phone_number = '+5511999990088'),
+  0,
+  'payload divergente: NÃO cria contato para o telefone divergente'
+);
+SELECT is(
+  (SELECT count(*)::int FROM public.conversations c JOIN public.contacts ct ON ct.id = c.contact_id WHERE c.organization_id = (SELECT v FROM ids WHERE k = 'org_a') AND ct.phone_number = '+5511999990088'),
+  0,
+  'payload divergente: NÃO cria conversa para o telefone divergente'
+);
+SELECT is(
+  (SELECT (id, organization_id, name, phone_number, updated_at) FROM public.contacts WHERE id = (SELECT contact_id FROM r1)),
+  (SELECT (id, organization_id, name, phone_number, updated_at) FROM original_contact_snapshot),
+  'payload divergente: contato original inalterado'
+);
+SELECT is(
+  (SELECT (id, status, assigned_user_id, assigned_at, resolved_at, last_message_at, updated_at) FROM public.conversations WHERE id = (SELECT conversation_id FROM r1)),
+  (SELECT (id, status, assigned_user_id, assigned_at, resolved_at, last_message_at, updated_at) FROM original_conversation_snapshot),
+  'payload divergente: conversa original inalterada (last_message_at não avança)'
 );
 
 -- ---------------------------------------------------------------------------

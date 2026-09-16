@@ -34,12 +34,24 @@
 -- messages_whatsapp_account_external_id_key (0003_atendimento.sql) é a
 -- autoridade final contra duplicidade e concorrência — a função nunca conclui
 -- "esta mensagem é nova" apenas por não ter encontrado nada em um SELECT
--- prévio. O padrão usado para contacts, conversations e messages é sempre:
--- INSERT ... ON CONFLICT ... DO NOTHING RETURNING ... INTO var; se var ficar
--- NULL, um SELECT subsequente enxerga a linha que "venceu" a corrida (o
--- Postgres serializa por trás do índice único: a segunda transação bloqueia
--- na chave conflitante até a primeira commitar, e só então resolve o
--- conflito ou insere) — não é um "check-then-insert" vulnerável a corrida.
+-- prévio. O padrão usado para contacts e conversations é sempre: INSERT ...
+-- ON CONFLICT ... DO NOTHING RETURNING ... INTO var; se var ficar NULL, um
+-- SELECT subsequente enxerga a linha que "venceu" a corrida (o Postgres
+-- serializa por trás do índice único: a segunda transação bloqueia na chave
+-- conflitante até a primeira commitar, e só então resolve o conflito ou
+-- insere) — não é um "check-then-insert" vulnerável a corrida.
+--
+-- Correção pontual (revisão pós-Etapa 3, antes da aplicação remota de
+-- 0005): a mensagem só era testada contra a UNIQUE depois de já ter
+-- localizado/criado contato e conversa. Isso deixava a resposta final
+-- correta (duplicate = true, id da mensagem original) mas com efeito
+-- colateral real: uma reentrega com o mesmo (whatsapp_account_id,
+-- external_message_id) e um TELEFONE DIFERENTE do original criava um
+-- contato e uma conversa novos para esse telefone antes de descobrir que a
+-- mensagem já existia — reproduzido e confirmado por teste (seção "4b"
+-- abaixo) antes desta correção. A duplicidade agora é decidida ANTES de
+-- qualquer escrita em contato/conversa, via lock consultivo transacional
+-- (ver bloco logo após as validações de entrada).
 --
 -- Reabertura: quando a mensagem é realmente nova (não duplicata) e a
 -- conversa encontrada já existia com status = 'resolved', a linha é travada
@@ -123,6 +135,10 @@ declare
   v_created boolean := false;
   v_duplicate boolean := false;
   v_reopened boolean := false;
+  v_lock_key bigint;
+  v_existing_message_id uuid;
+  v_existing_conversation_id uuid;
+  v_existing_organization_id uuid;
 begin
   -- 1) usuário autenticado
   v_uid := auth.uid();
@@ -184,6 +200,98 @@ begin
   end if;
 
   -- ---------------------------------------------------------------------
+  -- Lock consultivo TRANSACIONAL (pg_advisory_xact_lock), chave
+  -- determinística derivada do PAR que a UNIQUE parcial protege:
+  -- (whatsapp_account_id, external_message_id). Adquirido ANTES de tocar em
+  -- contato ou conversa — é essa ordem que evita o efeito colateral: sem o
+  -- lock, uma reentrega com o mesmo par mas telefone/nome/conteúdo
+  -- diferentes só seria detectada como duplicata no INSERT de messages, já
+  -- depois de ter localizado/criado contato e conversa para o telefone
+  -- novo (confirmado por teste antes desta correção).
+  --
+  -- hashtextextended(text, seed bigint) é built-in do Postgres (pg_catalog,
+  -- por isso chamado sem qualificação mesmo com search_path = '' — o
+  -- pg_catalog é sempre pesquisado implicitamente) e devolve bigint, o tipo
+  -- exigido pelo overload pg_advisory_xact_lock(bigint). O ':' como
+  -- separador nunca é ambíguo: p_whatsapp_account_id::text é sempre um uuid
+  -- bem formado (só hifens), que nunca contém ':'.
+  --
+  -- Por que chamadas com o MESMO par ficam serializadas: hashtextextended é
+  -- uma função determinística — duas chamadas com a mesma
+  -- (whatsapp_account_id, external_message_id) sempre calculam a mesma
+  -- v_lock_key. pg_advisory_xact_lock bloqueia a segunda chamada até a
+  -- primeira liberar essa chave; quando a segunda finalmente adquire o
+  -- lock, sua consulta abaixo já enxerga (READ COMMITTED, nova instantânea
+  -- por comando) a mensagem que a primeira gravou, se foi o caso.
+  --
+  -- Por que uma colisão de hash (pares DIFERENTES caindo na mesma chave)
+  -- não compromete a integridade: o lock é só um mutex de conveniência para
+  -- evitar trabalho e escrita órfã no caminho comum — nunca é ele quem
+  -- decide "isto é duplicata". Quem decide é a consulta a public.messages
+  -- logo abaixo, filtrada pelas colunas reais (whatsapp_account_id,
+  -- external_message_id), e, como cinturão e suspensório, a própria UNIQUE
+  -- parcial no INSERT mais adiante. Uma colisão faria, no pior caso, duas
+  -- chamadas para pares diferentes esperarem uma pela outra sem necessidade
+  -- — mais lento, nunca incorreto.
+  --
+  -- Por que o lock é liberado sozinho: pg_advisory_xact_lock (variante
+  -- "_xact", não a de sessão) prende ao final da transação atual —
+  -- Postgres libera automaticamente em COMMIT ou ROLLBACK, inclusive se
+  -- esta função levantar exceção mais adiante. Não há UNLOCK explícito, e
+  -- não usamos pg_advisory_lock (o de sessão, que precisaria de
+  -- pg_advisory_unlock manual e sobreviveria a esta transação).
+  --
+  -- Por que a UNIQUE parcial continua necessária mesmo com o lock: o lock
+  -- só serializa chamadas desta função entre si. Não é ele quem impede uma
+  -- violação de integridade no banco — quem impede é a constraint,
+  -- independente de qualquer disciplina de locking na aplicação (inclusive
+  -- se um dia outro caminho de escrita, um bug, ou uma sessão que calcule a
+  -- chave errada, tentar inserir sem passar por aqui). Por isso o INSERT de
+  -- mensagem mais abaixo mantém ON CONFLICT ... DO NOTHING como autoridade
+  -- final — na prática, dado o lock, o "ON CONFLICT" ali não deveria mais
+  -- disparar para chamadas que passam por esta função, mas continua sendo a
+  -- garantia real.
+  -- ---------------------------------------------------------------------
+  v_lock_key := hashtextextended(p_whatsapp_account_id::text || ':' || v_external_message_id, 0);
+  perform pg_advisory_xact_lock(v_lock_key);
+
+  -- Variáveis DEDICADAS para esta consulta (v_existing_*, não
+  -- v_organization_id/v_conversation_id/v_message_id): um SELECT INTO sem
+  -- STRICT zera TODOS os seus alvos para NULL quando não encontra linha —
+  -- não apenas deixa de atribuí-los. Se esta consulta reaproveitasse
+  -- v_organization_id (já preenchido pela busca da conta, logo acima) e
+  -- caísse no caminho comum de "mensagem realmente nova" (nenhuma linha
+  -- encontrada), v_organization_id seria zerado para NULL e o INSERT em
+  -- contacts logo abaixo violaria a NOT NULL — bug real, pego pelo teste
+  -- "fluxo completo" (seção 1) ao aplicar esta correção antes de testar.
+  select m.id, m.conversation_id, m.organization_id
+    into v_existing_message_id, v_existing_conversation_id, v_existing_organization_id
+  from public.messages m
+  where m.whatsapp_account_id = p_whatsapp_account_id
+    and m.external_message_id = v_external_message_id;
+
+  if found then
+    -- Duplicata detectada ANTES de qualquer escrita em contato/conversa:
+    -- nada foi criado ou alterado para o payload desta chamada (telefone,
+    -- nome, conteúdo) — apenas devolvemos os IDs da mensagem original.
+    select c.contact_id into v_contact_id
+    from public.conversations c
+    where c.organization_id = v_existing_organization_id
+      and c.id = v_existing_conversation_id;
+
+    return query
+    select
+      v_existing_organization_id,
+      v_contact_id,
+      v_existing_conversation_id,
+      v_existing_message_id,
+      false,
+      true,
+      false;
+    return;
+  end if;
+
+  -- ---------------------------------------------------------------------
   -- Contato: localizar ou criar por (organization_id, phone_number).
   -- ON CONFLICT DO NOTHING é a defesa contra criação concorrente do mesmo
   -- contato — a UNIQUE (organization_id, phone_number) de
@@ -234,6 +342,15 @@ begin
   -- levanta exceção de duplicidade — apenas não insere, e o ramo abaixo
   -- distingue "criada" de "duplicata" olhando se v_message_id veio da
   -- própria inserção.
+  --
+  -- Dado o lock consultivo acima, uma chamada que chega até aqui já provou,
+  -- sob a mesma chave (whatsapp_account_id, external_message_id), que
+  -- nenhuma mensagem para este par existia no momento em que adquiriu o
+  -- lock — então, para chamadas que passam por esta função, o ramo
+  -- "v_message_id is null" abaixo não deveria mais disparar na prática.
+  -- Mantido mesmo assim como cinturão e suspensório: é a UNIQUE, não o
+  -- lock, quem de fato impede duas linhas para o mesmo par (ver nota acima
+  -- sobre por que o lock não substitui a constraint).
   -- ---------------------------------------------------------------------
   insert into public.messages (
     organization_id,
