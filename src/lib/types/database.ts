@@ -341,6 +341,24 @@ export type Database = {
         Args: { target_user: string };
         Returns: boolean;
       };
+      ingest_inbound_message: {
+        Args: {
+          p_whatsapp_account_id: string;
+          p_phone_number: string;
+          p_content: string;
+          p_external_message_id: string;
+          p_contact_name?: string | null;
+        };
+        Returns: {
+          organization_id: string;
+          contact_id: string;
+          conversation_id: string;
+          message_id: string;
+          created: boolean;
+          duplicate: boolean;
+          reopened: boolean;
+        }[];
+      };
     };
     Enums: {
       organization_status: OrganizationStatus;
