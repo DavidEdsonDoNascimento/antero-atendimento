@@ -8,7 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test 'src/modules/conversations/*.test.ts'"
+    "test:unit": "node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
