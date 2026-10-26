@@ -2,15 +2,16 @@
 -- Confere os papéis criados por docker/postgres/initdb/10-roles.sh. Não depende
 -- de nenhuma migration. Roda só no banco de testes (`pnpm db:test:pgtap`).
 BEGIN;
-SELECT plan(12);
+SELECT plan(15);
 
 SELECT has_role('antero_owner', 'antero_owner existe');
 SELECT has_role('antero_migrator', 'antero_migrator existe');
 SELECT has_role('antero_app', 'antero_app existe');
+SELECT has_role('antero_auth', 'antero_auth existe');
 
 SELECT is(
   (SELECT count(*)::int FROM pg_roles
-   WHERE rolname IN ('antero_owner', 'antero_migrator', 'antero_app')
+   WHERE rolname IN ('antero_owner', 'antero_migrator', 'antero_app', 'antero_auth')
      AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication)),
   0,
   'nenhum papel do Antero é superusuário/BYPASSRLS/CREATEROLE/CREATEDB/REPLICATION'
@@ -35,9 +36,9 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT count(*)::int FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname = 'antero_app'),
+  (SELECT count(*)::int FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname IN ('antero_app', 'antero_auth')),
   0,
-  'antero_app não possui objetos'
+  'antero_app e antero_auth não possuem objetos'
 );
 
 SELECT ok(
@@ -53,6 +54,17 @@ SELECT ok(
 SELECT ok(
   NOT has_schema_privilege('public', 'public', 'USAGE'),
   'PUBLIC não tem USAGE no schema public'
+);
+
+SELECT ok(
+  NOT has_schema_privilege('antero_auth', 'public', 'USAGE'),
+  'antero_auth não tem USAGE no schema public (só enxerga o schema auth)'
+);
+
+SELECT ok(
+  NOT has_database_privilege('antero_app', current_database(), 'TEMP')
+    AND NOT has_database_privilege('antero_auth', current_database(), 'TEMP'),
+  'antero_app e antero_auth não criam tabelas temporárias'
 );
 
 SELECT has_extension('pgtap', 'pgtap instalado no banco de testes');
