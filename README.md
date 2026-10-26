@@ -2,19 +2,20 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Ambiente local (PostgreSQL próprio + Better Auth + Mailpit; detalhes em
+`docs/INFRA-LOCAL.md` e `docs/AUTH.md`):
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+pnpm install
+pnpm infra:env && pnpm env:local     # .env.infra e .env.local (locais, fora do Git)
+pnpm infra:up && pnpm db:migrate     # PostgreSQL + Mailpit e schema
+pnpm db:dev-fixtures                 # dados fictícios (opcional)
+pnpm dev                             # http://127.0.0.1:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Guia completo: `docs/SETUP.md`.
+
+Este projeto usa **pnpm** (versão fixada em `packageManager` no `package.json`) como único gerenciador de pacotes. Habilite-o com `corepack enable`, se necessário.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

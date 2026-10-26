@@ -1,6 +1,7 @@
+import type { OrganizationContext } from "@/lib/db";
 import { InvalidCursorError } from "@/modules/conversations/errors";
 import { MESSAGES_PAGE_LIMIT } from "@/modules/conversations/pagination";
-import { listConversationMessages, listConversations } from "@/modules/conversations/queries";
+import { listConversationMessages, listConversations } from "@/modules/conversations/sql-queries";
 import type {
   ConversationListPage,
   ConversationStatusFilter,
@@ -13,17 +14,20 @@ import type {
  * `InvalidCursorError` para a tela de erro genérica, cai de volta para a
  * primeira página do filtro atual. O cursor é opaco para esta camada —
  * nunca é decodificado aqui, só repassado para a DAL.
+ *
+ * `context` vem do DAL (`organizationContextOf(await requireActiveContext())`):
+ * usuário da sessão validada + organização ativa — nunca da URL.
  */
 export async function loadConversationList(
-  organizationId: string,
+  context: OrganizationContext,
   status: ConversationStatusFilter | undefined,
   cursor: string | undefined,
 ): Promise<ConversationListPage> {
   try {
-    return await listConversations(organizationId, { status, cursor });
+    return await listConversations(context, { status, cursor });
   } catch (error) {
     if (error instanceof InvalidCursorError) {
-      return listConversations(organizationId, { status });
+      return listConversations(context, { status });
     }
     throw error;
   }
@@ -44,19 +48,19 @@ const EMPTY_MESSAGE_PAGE: MessageHistoryPage = { items: [], nextCursor: null };
  * tratada como histórico vazio, não como erro.
  */
 export async function loadConversationMessages(
-  organizationId: string,
+  context: OrganizationContext,
   conversationId: string,
   cursor: string | undefined,
 ): Promise<MessageHistoryPage> {
   try {
-    const page = await listConversationMessages(organizationId, conversationId, {
+    const page = await listConversationMessages(context, conversationId, {
       cursor,
       limit: MESSAGES_PAGE_LIMIT.max,
     });
     return page ?? EMPTY_MESSAGE_PAGE;
   } catch (error) {
     if (error instanceof InvalidCursorError) {
-      const page = await listConversationMessages(organizationId, conversationId, {
+      const page = await listConversationMessages(context, conversationId, {
         limit: MESSAGES_PAGE_LIMIT.max,
       });
       return page ?? EMPTY_MESSAGE_PAGE;

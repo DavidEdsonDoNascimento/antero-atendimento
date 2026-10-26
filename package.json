@@ -3,17 +3,48 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:unit": "node --test 'src/**/*.test.ts'"
+    "check:supabase": "node scripts/check-no-supabase.mjs",
+    "test:unit": "node --test 'src/**/*.test.ts'",
+    "infra:env": "node scripts/infra.mjs env",
+    "env:local": "node scripts/infra.mjs env-local",
+    "infra:up": "node scripts/infra.mjs up",
+    "infra:stop": "node scripts/infra.mjs stop",
+    "infra:status": "node scripts/infra.mjs status",
+    "infra:logs": "node scripts/infra.mjs logs",
+    "db:verify": "node scripts/infra.mjs verify dev",
+    "db:roles": "node scripts/infra.mjs roles dev",
+    "db:auth-schema": "node scripts/infra.mjs auth-schema dev",
+    "db:migrate": "node scripts/infra.mjs migrate dev up",
+    "db:migrate:status": "node scripts/infra.mjs migrate dev status",
+    "db:migrate:rollback": "node scripts/infra.mjs migrate dev rollback",
+    "db:new": "node scripts/infra.mjs new",
+    "db:test:up": "node scripts/infra.mjs test-up",
+    "db:test:reset": "node scripts/infra.mjs test-reset",
+    "db:test:stop": "node scripts/infra.mjs test-stop",
+    "db:test:verify": "node scripts/infra.mjs verify test",
+    "db:test:roles": "node scripts/infra.mjs roles test",
+    "db:test:migrate": "node scripts/infra.mjs migrate test up",
+    "db:test:migrate:status": "node scripts/infra.mjs migrate test status",
+    "db:test:migrate:rollback": "node scripts/infra.mjs migrate test rollback",
+    "db:test:auth-schema": "node scripts/infra.mjs auth-schema test",
+    "db:test:pgtap": "node scripts/infra.mjs pgtap",
+    "db:test:integration": "node scripts/infra.mjs integration",
+    "auth:provision": "node scripts/infra.mjs auth-provision",
+    "db:dev-fixtures": "node scripts/infra.mjs dev-fixtures",
+    "app:e2e": "node scripts/infra.mjs app-e2e",
+    "app:build": "node scripts/infra.mjs app-build"
   },
   "dependencies": {
-    "@supabase/ssr": "^0.12.3",
-    "@supabase/supabase-js": "^2.110.8",
+    "better-auth": "1.7.12",
+    "kysely": "0.29.7",
     "next": "16.3.4",
+    "nodemailer": "10.1.0",
+    "pg": "8.23.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "server-only": "^0.0.1",
@@ -22,6 +53,8 @@
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/nodemailer": "8.0.2",
+    "@types/pg": "8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "babel-plugin-react-compiler": "1.0.0",
@@ -30,7 +63,5 @@
     "tailwindcss": "^4",
     "typescript": "^5"
   },
-  "allowScripts": {
-    "unrs-resolver@1.12.2": true
-  }
+  "packageManager": "pnpm@11.18.0"
 }

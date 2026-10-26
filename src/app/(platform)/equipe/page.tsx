@@ -5,20 +5,21 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconTeam } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
-import { requireActiveContext } from "@/lib/auth/dal";
+import { organizationContextOf, requireActiveContext } from "@/lib/auth/dal";
 import {
   memberStatusLabel,
   memberStatusTone,
   roleLabel,
   roleTone,
 } from "@/lib/labels";
-import { listOrganizationMembers } from "@/modules/users/queries";
+import { listOrganizationMembers } from "@/modules/users/sql-queries";
 
 export const metadata: Metadata = { title: "Equipe" };
 
 export default async function EquipePage() {
-  const { organization } = await requireActiveContext();
-  const members = await listOrganizationMembers(organization.id);
+  const members = await listOrganizationMembers(
+    organizationContextOf(await requireActiveContext()),
+  );
 
   return (
     <div className="space-y-6">

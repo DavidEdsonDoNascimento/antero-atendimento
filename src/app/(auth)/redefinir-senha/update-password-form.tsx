@@ -1,15 +1,24 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useActionState } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { updatePassword, type AuthFormState } from "@/modules/auth/actions";
+import {
+  resetPassword,
+  type AuthFormState,
+} from "@/modules/auth/browser-actions";
 
-export function UpdatePasswordForm() {
+export function UpdatePasswordForm({ token }: { token: string }) {
+  const router = useRouter();
   const [state, action] = useActionState<AuthFormState, FormData>(
-    updatePassword,
+    async (_prev, formData) => {
+      const result = await resetPassword(token, formData);
+      if (result.redirectTo) router.replace(result.redirectTo);
+      return result.state;
+    },
     undefined,
   );
 

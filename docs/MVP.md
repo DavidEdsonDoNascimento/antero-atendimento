@@ -27,7 +27,7 @@ Concluído:
 - [x] Estrutura modular por domínio
 - [x] Identidade visual inicial (escuro premium + dourado discreto)
 - [x] Layout autenticado (sidebar, header, org ativa, menu do usuário)
-- [x] Clients Supabase (browser e server) + validação de env com Zod
+- [x] Acesso ao banco e validação de ambiente (Supabase no Ciclo 1; PostgreSQL próprio desde a migração)
 - [x] Autenticação: login, logout, recuperação e redefinição de senha
 - [x] Organizações e membros (modelo + telas)
 - [x] RLS com isolamento multiempresa + funções auxiliares
@@ -61,7 +61,7 @@ colocar tokens no código, não usar dados fixos da Antero nos componentes.
 
 ## Roteiro de demonstração (ao final dos primeiros ciclos)
 
-Configurar Supabase → criar 1º usuário → cadastrar Antero → login → acessar a
+Preparar o ambiente (`docs/SETUP.md`) → criar 1º usuário → cadastrar Antero → login → acessar a
 plataforma → (Ciclo 2) criar/ver contato simulado, receber mensagem simulada →
 (Ciclo 3) iniciar o fluxo da Antero, responder opções, capturar nome/empresa/
 necessidade, encaminhar para humano → assumir como atendente → responder →

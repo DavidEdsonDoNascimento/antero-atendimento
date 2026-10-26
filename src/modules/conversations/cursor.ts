@@ -10,7 +10,7 @@ import { InvalidCursorError } from "./errors.ts";
 // Lógica pura (JSON + base64 + validação Zod, sem I/O, sem segredo) — sem
 // `import "server-only"` de propósito, para permanecer testável com
 // `node --test` sem flags especiais. O limite server-side real está em
-// `queries.ts`, que é quem toca o cliente Supabase/cookies e importa este
+// `sql-queries.ts`, que é quem usa o PostgreSQL e importa este
 // módulo.
 
 /**

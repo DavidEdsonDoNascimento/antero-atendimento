@@ -8,7 +8,7 @@ import type {
 
 /**
  * Formatos brutos retornados pelo PostgREST para cada `select` desta DAL.
- * Espelham exatamente os campos pedidos em `queries.ts` — nunca são
+ * Espelham exatamente os campos montados por `sql.ts` — nunca são
  * expostos fora do módulo; `mappers.ts` os converte para os tipos de
  * domínio em `types.ts`.
  */
@@ -42,7 +42,7 @@ export type ConversationAssignedMemberRow = {
 
 /**
  * `messages` embutido a partir de `conversations`. Sempre um array (relação
- * um-para-muitos no PostgREST), mas a consulta em `queries.ts` aplica
+ * um-para-muitos no PostgREST), mas a consulta em `sql.ts` aplica
  * `order` + `limit(1)` escopados a esta tabela referenciada — o array nunca
  * tem mais de 1 item na prática.
  */

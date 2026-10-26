@@ -1,7 +1,13 @@
 # Banco de dados — Antero Atendimento
 
-PostgreSQL (Supabase). UUIDs como chave. RLS obrigatório. Migrations em
-`supabase/migrations`.
+PostgreSQL. UUIDs como chave. RLS obrigatório.
+
+- **Banco:** PostgreSQL 17 próprio; migrations em `db/migrations` (dbmate),
+  a única fonte oficial. Identidade do Better Auth (schema `auth`). Ver a
+  seção "PostgreSQL próprio" ao final.
+- **Histórico:** o modelo nasceu no Supabase (migrations originais, removidas
+  do projeto na Entrega 6). Recuperáveis no Git:
+  `git show 796c6e7:supabase/migrations/0001_init.sql`.
 
 ## Estratégia por ciclos
 
@@ -207,7 +213,8 @@ Garantias exigidas e atendidas:
 - Um usuário não vê dados de outra organização.
 - Um atendente não altera configurações administrativas (INSERT/UPDATE exigem
   `owner`/`admin`).
-- Usuário não autenticado não acessa nada (sem sessão, `auth.uid()` é nulo).
+- Usuário não autenticado não acessa nada (sem sessão, `auth.uid()` — no
+  banco próprio, `app.current_user_id()` — é nulo).
 - O cliente não consegue “forjar” outro `organization_id`: as políticas checam a
   associação real no banco, não um valor enviado pelo frontend.
 - `contacts`, `conversations` e `messages` **não** concedem leitura a
@@ -231,3 +238,279 @@ canal, não a organização: duas contas de WhatsApp são fluxos de entrega
 independentes, e um id externo de uma conta não deveria bloquear o mesmo id
 em outra conta da mesma organização. O Ciclo 4 adicionará `webhook_events`
 com o mesmo propósito do lado do webhook real da Meta.
+
+## PostgreSQL próprio (Entrega 2)
+
+### Ordem das migrations e dependências
+
+| Migration | Cria | Depende de |
+| --- | --- | --- |
+| `0000_identity` | schema `auth` (tabelas do Better Auth) e schema `app` (contexto do usuário) | papéis `antero_owner`, `antero_app`, `antero_auth` (infra) |
+| `0001_init` | enums, `profiles`, `organizations`, `organization_members`, `whatsapp_accounts`, funções de autorização, gatilhos de perfil | `auth.users`, `app.current_user_id()` |
+| `0002_rls` | privilégios de `antero_app` e as 14 políticas do Ciclo 1 | 0001 |
+| `0003_atendimento` | `contacts`, `conversations`, `messages` (idêntica à original) | 0001 |
+| `0004_atendimento_rls` | as 3 políticas de leitura do Ciclo 2 | 0003 |
+| `0005_ingest_inbound_message` | função de ingestão | 0001, 0003 |
+
+O banco é construído integralmente do zero por `pnpm db:test:migrate`.
+
+### O que mudou em relação ao Supabase
+
+| Supabase | Banco próprio |
+| --- | --- |
+| `auth.users` (Supabase Auth) | `auth.users` do Better Auth 1.7.12 (`users`, `sessions`, `accounts`, `verifications`; ids `uuid`) |
+| `auth.uid()` (claim JWT) | `app.current_user_id()` (contexto da transação) |
+| papel `authenticated` | `antero_app` + contexto de usuário |
+| papel `anon` | `antero_app` **sem** contexto → nada visível |
+| `service_role` | não existe; `antero_auth` só enxerga `auth` |
+| `raw_user_meta_data ->> 'full_name'` | `auth.users.name` |
+
+Tabelas, colunas, tipos, enums, constraints, índices, FKs compostas,
+gatilhos, nomes e expressões das 17 políticas e o corpo de
+`ingest_inbound_message` foram preservados. `gen_random_uuid()` é nativa
+(sem `pgcrypto`).
+
+### Identidade (Better Auth)
+
+- Configuração do schema em `src/lib/auth/better-auth-options.ts`:
+  `generateId: "uuid"`, tabelas no plural, colunas em snake_case,
+  `schemaName: "auth"`. Mudou a configuração → nova migration. A instância
+  de runtime (`src/lib/identity`, Entrega 5A) parte dessas opções e não cria
+  tabelas (rate limit em memória, sem plugins) — ver `docs/AUTH.md`.
+- `pnpm db:test:auth-schema` compara o banco com o planejador oficial do
+  Better Auth e com uma checagem estrita de tipos (`uuid` em ids e FKs).
+- `profiles.id` → `auth.users.id` (`on delete cascade`). `profiles` nasce pelo
+  gatilho `handle_new_user` (nome vazio → parte local do e-mail) e
+  `profiles.email` acompanha `auth.users.email` (`handle_user_email_updated`).
+  Os dois são `SECURITY DEFINER`: `antero_auth` não precisa de nada em
+  `public`.
+- `antero_app` não tem `USAGE` em `auth`: não lê hashes de senha
+  (`accounts.password`), tokens de sessão, tokens OAuth nem verificações.
+
+### Contexto do usuário
+
+```sql
+begin;
+select app.set_user_context('<id da sessão validada no servidor>');
+-- consultas da aplicação (RLS usa app.current_user_id())
+commit;
+```
+
+- `set_user_context` grava `app.user_id` com escopo de **transação** e uma
+  marca da transação (pid + início). `current_user_id()` só devolve o id se a
+  marca for da transação atual: um `SET` de sessão, um `SET` direto de
+  `app.user_id` ou um contexto que sobrou de outra transação resultam em
+  `NULL` → acesso negado. Compatível com pool.
+- O valor **não autentica ninguém**: só a camada de servidor (DAL) pode
+  defini-lo, a partir de uma sessão do Better Auth já validada — nunca de um id
+  vindo do cliente.
+
+### Correção de segurança em `profiles`
+
+No original, `authenticated` tinha `UPDATE` em todas as colunas de
+`profiles` e `profiles_update_own` só conferia `id = auth.uid()`: qualquer
+usuário podia se tornar `is_platform_admin` ou trocar o próprio e-mail
+desnormalizado. Agora `antero_app` só tem `UPDATE (full_name)`;
+`is_platform_admin` muda apenas administrativamente e `email` vem de
+`auth.users`. A aplicação atual não escreve em `profiles`, então nada muda
+para ela.
+
+**Pendência de segurança no Supabase antigo (produção atual):** a falha
+continua lá — qualquer usuário autenticado pode executar, pela API do
+Supabase, `update profiles set is_platform_admin = true` no próprio registro.
+Não foi alterada (Supabase remoto fora do escopo). Recomenda-se aplicar lá a
+mesma restrição de coluna (`revoke update … ; grant update (full_name) …`) ou
+concluir a migração antes de expor o produto a usuários não confiáveis.
+
+### Entrada de sistema (webhook/worker) — desenho futuro
+
+`ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo
+(é o que o simulador de desenvolvimento usa). A ingestão real da Meta **não**
+deve afrouxá-la (aceitar contexto nulo, "usuário de sistema" global ou
+`organization_id` vindo do chamador). Desenho previsto:
+
+1. papel dedicado (ex.: `antero_ingest`, `LOGIN`, sem `BYPASSRLS`, sem
+   privilégio de leitura nas tabelas) usado só pelo processo do webhook;
+2. função separada `SECURITY DEFINER` executável apenas por esse papel, que
+   recebe o identificador externo da conta (assinatura da Meta já validada
+   pelo webhook) e deriva `organization_id` **somente** de um
+   `whatsapp_account` `cloud_api` conectado;
+3. a gravação (contato, conversa, mensagem, idempotência, reabertura) é
+   extraída para uma função interna comum, sem `EXECUTE` para nenhum papel de
+   login, chamada pelas duas portas de entrada;
+4. `webhook_events` (Ciclo 4) registra a entrega bruta antes da ingestão.
+
+### Pendência obrigatória: regras herdadas de gerenciamento de membros
+
+Preservadas da migração sem alteração, mas **precisam de decisão de negócio
+antes de implementar o gerenciamento de membros/usuários** (telas ou ações
+de equipe):
+
+- `organization_members_update`: um `admin` ativo pode alterar o `role` de
+  qualquer vínculo da organização — inclusive promover alguém (ou a si
+  mesmo) a `owner` e rebaixar um `owner`;
+- `organization_members_delete`: um `admin` pode remover qualquer vínculo,
+  inclusive o de um `owner`, e uma organização pode ficar sem `owner`;
+- `organization_members_insert`: um `admin` pode criar vínculos com qualquer
+  papel, inclusive `owner`.
+
+Decidir (ex.: só `owner` gerencia `owner`/`admin`; pelo menos um `owner`
+ativo sempre) e implementar com nova migration + testes pgTAP.
+
+## Camada de acesso da aplicação (Entrega 3)
+
+`src/lib/db` (server-only; importe só de `@/lib/db`):
+
+```ts
+import { withUserTransaction } from "@/lib/db";
+
+const rows = await withUserTransaction(sessionUserId, async (tx) => {
+  const { rows } = await tx.query("SELECT … WHERE organization_id = $1", [organizationId]);
+  return rows;
+});
+```
+
+- Conexão do pool `antero_app` (`APP_DATABASE_URL`) → `BEGIN` →
+  `app.set_user_context($1::uuid)` → callback na mesma conexão → `COMMIT` ou
+  `ROLLBACK` (erro propagado) → devolução da conexão (ou descarte, se quebrou).
+- `sessionUserId` deve vir **só** de uma sessão validada no servidor
+  (`lib/auth/dal.ts`); nunca de parâmetro, cookie ou corpo da requisição.
+- Não há helper sem usuário nem acesso privilegiado: sem contexto a RLS não
+  mostra nada, e a futura ingestão da Meta terá entrada própria (seção
+  "Entrada de sistema").
+- `tx.query` recusa controle de transação/sessão, troca de contexto e
+  parâmetros `Date`; sempre um comando por chamada.
+- Timestamps chegam como string ISO com microssegundos, no mesmo formato do
+  PostgREST (`2026-10-26T13:45:12.123456+00:00`); passe-os de volta como
+  string nos parâmetros (`$1::timestamptz`).
+
+## Consultas SQL da aplicação (Entrega 4)
+
+Camada de leitura implementada na Entrega 4 e **ativada na Entrega 5B**: o
+DAL e as páginas usam `modules/*/sql-queries.ts`;
+os `queries.ts` (PostgREST) do Supabase foram removidos na Entrega 6.
+
+### Contexto de organização
+
+```ts
+import { withOrganizationTransaction } from "@/lib/db";
+
+await withOrganizationTransaction({ userId, organizationId }, async (tx) => { … });
+```
+
+`withUserTransaction` + `SELECT public.is_org_member($1)` na mesma
+transação: sem vínculo **ativo** (desativado, sem organização, outra
+empresa, id inexistente ou inválido) → `AccessDeniedError` genérico antes do
+callback. `userId` precisa vir de uma sessão validada e `organizationId` da
+associação ativa desse usuário (`getActiveContext` abaixo) — nunca do
+navegador. As consultas mantêm a RLS e ainda filtram `organization_id`
+explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
+(testado).
+
+### Funções disponíveis
+
+| Módulo (`sql-queries.ts`) | Função | Uso |
+| --- | --- | --- |
+| `conversations` | `listConversations(ctx, params)` | lista da Inbox |
+| `conversations` | `getConversationDetail(ctx, id)` | detalhe da conversa |
+| `conversations` | `listConversationMessages(ctx, id, params)` | histórico paginado |
+| `organizations` | `getActiveContext({ userId })` | contexto ativo do DAL (`lib/auth/dal.ts`) |
+| `organizations` | `listAllOrganizations({ userId })` | `/admin` (confere o papel no banco) |
+| `users` | `listOrganizationMembers(ctx)` | Equipe |
+| `users` | `getOwnProfile({ userId })` | perfil do próprio usuário (DAL) |
+| `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | Configurações |
+
+`ctx` = `{ userId, organizationId }` (`OrganizationContext`), entregue pelo
+DAL (`organizationContextOf`). O SQL da Inbox fica em
+`modules/conversations/sql.ts` (puro, testado sem banco); `cursor.ts`,
+`pagination.ts`, `mappers.ts`, `rows.ts` e `types.ts` são os contratos de
+retorno.
+
+### Equivalência com o contrato original (PostgREST)
+
+- Embeds → JOINs pelas mesmas FKs compostas: contato e canal (JOIN),
+  atendente e perfil (LEFT JOIN), última mensagem por `LEFT JOIN LATERAL`
+  pela FK tripla de `messages`. As linhas são remontadas no formato de
+  `rows.ts` (`last_message` como array de 0/1 item).
+- Os testes geram as linhas exatamente como o PostgREST as montava
+  (subconsultas JSON executadas sob a RLS do usuário), passam pelos mesmos
+  mapeadores e comparam item a item com o resultado SQL.
+- Erros: `InvalidCursorError` e `ConversationQueryError` como antes (o
+  `DatabaseError` original fica em `cause`); contexto inválido →
+  `AccessDeniedError`/`InvalidUserContextError`. As consultas auxiliares
+  lançam `Error` com o mesmo prefixo de mensagem das atuais.
+
+Diferenças deliberadas (todas cobertas por teste):
+
+1. **Atendente desativado**: a RLS de `profiles` (`shares_org_with`) oculta
+   o perfil de quem não tem vínculo ativo. O PostgREST devolvia
+   `assigned_member.profile = null` e `mapAssignee` quebrava com `TypeError`
+   (**defeito latente no fluxo atual**: uma conversa atribuída a alguém
+   depois desativado derruba a Inbox e o detalhe). No SQL o atendente sai
+   com `fullName: null` e o mapeador fica igual.
+2. **Última mensagem com empate exato** em `created_at`: o PostgREST
+   ordenava só por `created_at` (resultado indefinido); o SQL desempata por
+   `id DESC`, igual à última linha do histórico.
+3. **Desempate por `id`** também em membros (`created_at, id`), conta
+   principal e lista de organizações.
+4. **Cursor bem formado, mas recusado pelo PostgreSQL** como timestamp (ex.:
+   ano `0000`, aceito pelo formato ISO): `InvalidCursorError` (o loader
+   volta à primeira página) em vez de erro de consulta.
+5. **`listAllOrganizations`**: o papel de administrador da plataforma é
+   conferido no banco; quem não é recebe `AccessDeniedError` (a RLS sozinha
+   devolveria as próprias organizações). A página `/admin` já exige o papel.
+6. Colunas sempre explícitas (nunca `*`): uma coluna nova (ex.: credencial
+   da Meta em `whatsapp_accounts`) não passa a sair sem revisão.
+
+### Paginação
+
+- `last_message_at` e `messages.created_at` são `NOT NULL DEFAULT now()`
+  (0003): não existe timestamp nulo, e conversa sem mensagens aparece pela
+  própria `last_message_at` (= `started_at` ao nascer), com
+  `lastMessage: null`. Por isso o keyset composto
+  `(last_message_at, id) < ($ts::timestamptz, $id::uuid)` é exatamente o
+  `last_message_at.lt.X or (eq.X and id.lt.Y)` do PostgREST.
+- Ordem `last_message_at DESC, id DESC` (lista) e `created_at DESC, id DESC`
+  (histórico, invertido em memória para a ordem cronológica). Busca
+  `limit + 1`; `nextCursor` aponta para o último item **devolvido** (a linha
+  extra só indica que há mais).
+- Cursores e timestamps são strings ISO com microssegundos, como no
+  PostgREST: um cursor gerado pela versão Supabase continua válido.
+- O cursor é só uma posição: usado com outro filtro, devolve os itens desse
+  filtro mais antigos que a posição; de outra empresa, não revela nada (filtro
+  explícito + RLS). Cursor inválido → `InvalidCursorError` antes de usar
+  conexão (lista) ou após confirmar a conversa (histórico, como antes).
+
+### Desempenho (medido com `EXPLAIN ANALYZE`, dados fictícios)
+
+Banco de testes, como `antero_app` com contexto (RLS ativa): 2 organizações
+× 20 mil conversas, 405 mil mensagens, uma conversa com 5 mil mensagens.
+
+| Consulta | Tempo |
+| --- | --- |
+| lista, 1ª página — JOINs/LATERAL no nível do `LIMIT` (1ª versão) | 1 774 ms |
+| lista, 1ª página — página escolhida antes dos JOINs (atual) | 118 ms |
+| lista, página profunda / filtro `open` com cursor (atual) | 61 ms |
+| lista (atual) + índice `(organization_id, last_message_at DESC, id DESC)` | 3–4 ms |
+| detalhe | 0,3 ms |
+| histórico, 1ª página (índice `messages_conversation_created_idx` de trás para frente) | 0,7 ms |
+| histórico, 2 500 mensagens adiante (keyset como condição do índice) | 14,5 ms |
+
+- Uma única consulta de dados por página da Inbox (sem N+1): o LATERAL roda
+  só para as `limit + 1` conversas da página.
+- O custo restante da lista é a política de RLS: `is_org_member()` é
+  chamada para cada conversa da organização antes do top-N. O índice acima
+  eliminaria isso (3–4 ms), mas **não foi criado**: exige migration e a
+  escala atual não precisa. Reavaliar antes de organizações com milhares de
+  conversas (junto com uma política que avalie o vínculo uma vez por
+  consulta).
+
+### Ativação (Entrega 5B — concluída)
+
+1. Better Auth valida a sessão → `userId`; `getActiveContext({ userId })` →
+   organização ativa e papel (DAL, com `cache` e `redirect`).
+2. Loaders e páginas usam `modules/*/sql-queries` com `{ userId,
+   organizationId }` do DAL; a regra de lint de `sql-queries` foi substituída
+   por uma que bloqueia o legado Supabase.
+3. Validado: suíte de integração, E2E contra o servidor real e roteiro no
+   navegador (lista, filtros, paginação, conversa, histórico, isolamento).

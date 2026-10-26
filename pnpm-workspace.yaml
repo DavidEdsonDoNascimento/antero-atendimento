@@ -1,0 +1,5 @@
+# Configuração do pnpm (projeto de pacote único — sem workspaces).
+# Scripts de build/postinstall só rodam para pacotes listados aqui.
+# `unrs-resolver` já era liberado no `allowScripts` do npm (resolver do ESLint).
+allowBuilds:
+  unrs-resolver: true

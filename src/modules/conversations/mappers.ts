@@ -18,10 +18,10 @@ import type {
 
 /**
  * Mapeamento de linhas cruas do PostgREST (`rows.ts`) para os tipos de
- * domínio (`types.ts`). Nenhuma função aqui toca o Supabase — só
+ * domínio (`types.ts`). Nenhuma função aqui toca o banco — só
  * transformação pura, testada com `node --test` (ver `mappers.test.ts`).
  * Sem `import "server-only"` de propósito: sem I/O, sem segredo — o limite
- * server-side real está em `queries.ts`, que importa este módulo.
+ * server-side real está em `sql-queries.ts`, que importa este módulo.
  */
 
 export const LAST_MESSAGE_EXCERPT_MAX_LENGTH = 140;

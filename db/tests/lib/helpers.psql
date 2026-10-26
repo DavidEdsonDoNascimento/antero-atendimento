@@ -1,0 +1,180 @@
+-- Antero Atendimentos — helpers dos testes pgTAP (incluído com \ir).
+--
+-- Extensão .psql de propósito: `pg_prove --ext .sql` não o executa como teste.
+-- Tudo é criado em pg_temp, dentro da transação do arquivo de teste, e some
+-- no ROLLBACK/fim da sessão.
+--
+-- Os testes rodam como antero_admin (superusuário do banco DESCARTÁVEL) só
+-- para montar fixtures. Toda verificação de acesso executa o SQL sob teste
+-- como antero_app ou antero_auth (SET LOCAL ROLE dentro do helper), com o
+-- contexto de usuário definido por app.set_user_context — exatamente como a
+-- aplicação fará. Superusuário ignora RLS; por isso nenhuma asserção de
+-- acesso é feita com o papel do runner.
+--
+-- Os helpers restauram o papel e LIMPAM o contexto ao terminar. Se o SQL sob
+-- teste falhar, throws_ok/throws_like (subtransação) revertem SET ROLE e
+-- set_config automaticamente.
+
+CREATE TEMP TABLE ids (k text PRIMARY KEY, v uuid NOT NULL);
+
+CREATE FUNCTION pg_temp.id(p_key text) RETURNS uuid
+LANGUAGE sql STABLE AS $$ SELECT v FROM ids WHERE k = p_key $$;
+
+-- Cria uma identidade fictícia COMO O BETTER AUTH FARIA: INSERT em auth.users
+-- executado por antero_auth (que não tem privilégio algum em public). O
+-- profile nasce pelo gatilho handle_new_user. O id fica em ids[p_key].
+CREATE FUNCTION pg_temp.new_user(p_key text, p_email text, p_name text DEFAULT NULL)
+RETURNS void
+LANGUAGE plpgsql AS $$
+DECLARE
+  v_id uuid;
+BEGIN
+  SET LOCAL ROLE antero_auth;
+  INSERT INTO auth.users (name, email, email_verified)
+  VALUES (coalesce(p_name, ''), p_email, true)
+  RETURNING id INTO v_id;
+  RESET ROLE;
+  INSERT INTO ids VALUES (p_key, v_id);
+END;
+$$;
+
+CREATE FUNCTION pg_temp.clear_context() RETURNS void
+LANGUAGE sql AS $$
+  SELECT set_config('app.user_id', '', true), set_config('app.user_context_tx', '', true);
+$$;
+
+-- Assume p_role e, se p_user não for NULL, o contexto desse usuário.
+CREATE FUNCTION pg_temp.become(p_role name, p_user uuid) RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_temp.clear_context();
+  EXECUTE format('SET LOCAL ROLE %I', p_role);
+  IF p_user IS NOT NULL THEN
+    PERFORM app.set_user_context(p_user);
+  END IF;
+END;
+$$;
+
+CREATE FUNCTION pg_temp.unbecome() RETURNS void
+LANGUAGE plpgsql AS $$
+BEGIN
+  RESET ROLE;
+  PERFORM pg_temp.clear_context();
+END;
+$$;
+
+-- Quantas linhas a consulta p_sql devolve para antero_app no contexto p_user
+-- (NULL = sem contexto).
+CREATE FUNCTION pg_temp.app_count(p_user uuid, p_sql text) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+  n bigint;
+BEGIN
+  PERFORM pg_temp.become('antero_app', p_user);
+  EXECUTE format('SELECT count(*) FROM (%s) q', p_sql) INTO n;
+  PERFORM pg_temp.unbecome();
+  RETURN n;
+END;
+$$;
+
+-- Executa o comando p_sql (INSERT/UPDATE/DELETE) como antero_app no contexto
+-- p_user e devolve quantas linhas ele afetou. Erros propagam (use com
+-- throws_ok para casos de negação por privilégio/RLS WITH CHECK).
+CREATE FUNCTION pg_temp.app_exec(p_user uuid, p_sql text) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+  n bigint;
+BEGIN
+  PERFORM pg_temp.become('antero_app', p_user);
+  EXECUTE p_sql;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM pg_temp.unbecome();
+  RETURN n;
+END;
+$$;
+
+-- Avalia uma expressão escalar como antero_app no contexto p_user.
+CREATE FUNCTION pg_temp.app_value(p_user uuid, p_expr text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  v text;
+BEGIN
+  PERFORM pg_temp.become('antero_app', p_user);
+  EXECUTE format('SELECT (%s)::text', p_expr) INTO v;
+  PERFORM pg_temp.unbecome();
+  RETURN v;
+END;
+$$;
+
+-- Executa p_sql como um papel arbitrário (ex.: antero_auth), sem contexto.
+CREATE FUNCTION pg_temp.role_exec(p_role name, p_sql text) RETURNS bigint
+LANGUAGE plpgsql AS $$
+DECLARE
+  n bigint;
+BEGIN
+  PERFORM pg_temp.become(p_role, NULL);
+  EXECUTE p_sql;
+  GET DIAGNOSTICS n = ROW_COUNT;
+  PERFORM pg_temp.unbecome();
+  RETURN n;
+END;
+$$;
+
+-- Chama a ingestão como antero_app no contexto p_user (como a aplicação fará).
+-- Mesmos nomes de parâmetro da função real (chame com notação nomeada).
+CREATE FUNCTION pg_temp.ingest_as(
+  p_user uuid,
+  p_whatsapp_account_id uuid,
+  p_phone_number text,
+  p_content text,
+  p_external_message_id text,
+  p_contact_name text DEFAULT NULL
+)
+RETURNS TABLE (
+  organization_id uuid,
+  contact_id uuid,
+  conversation_id uuid,
+  message_id uuid,
+  created boolean,
+  duplicate boolean,
+  reopened boolean
+)
+LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_temp.become('antero_app', p_user);
+  RETURN QUERY
+  SELECT * FROM public.ingest_inbound_message(
+    p_whatsapp_account_id => ingest_as.p_whatsapp_account_id,
+    p_phone_number => ingest_as.p_phone_number,
+    p_content => ingest_as.p_content,
+    p_external_message_id => ingest_as.p_external_message_id,
+    p_contact_name => ingest_as.p_contact_name
+  );
+  PERFORM pg_temp.unbecome();
+END;
+$$;
+
+-- Substitui cada {chave} de p_sql pelo id (literal) guardado em ids.
+CREATE FUNCTION pg_temp.fill(p_sql text) RETURNS text
+LANGUAGE plpgsql AS $$
+DECLARE
+  r record;
+BEGIN
+  FOR r IN SELECT k, v FROM ids LOOP
+    p_sql := replace(p_sql, '{' || r.k || '}', quote_literal(r.v::text));
+  END LOOP;
+  IF p_sql ~ '\{[a-z0-9_]+\}' THEN
+    RAISE EXCEPTION 'chave de fixture não encontrada em: %', p_sql;
+  END IF;
+  RETURN p_sql;
+END;
+$$;
+
+-- Atalhos legíveis: o usuário é a CHAVE do fixture (NULL = sem contexto).
+--   sees(usuário, select)  -> quantas linhas antero_app enxerga
+--   does(usuário, comando) -> quantas linhas antero_app afetou (erros propagam)
+CREATE FUNCTION pg_temp.sees(p_user_key text, p_sql text) RETURNS bigint
+LANGUAGE sql AS $$ SELECT pg_temp.app_count(pg_temp.id(p_user_key), pg_temp.fill(p_sql)) $$;
+
+CREATE FUNCTION pg_temp.does(p_user_key text, p_sql text) RETURNS bigint
+LANGUAGE sql AS $$ SELECT pg_temp.app_exec(pg_temp.id(p_user_key), pg_temp.fill(p_sql)) $$;

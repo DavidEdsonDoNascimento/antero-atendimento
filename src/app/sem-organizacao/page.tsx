@@ -2,9 +2,8 @@ import type { Metadata } from "next";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Logo } from "@/components/ui/logo";
-import { SubmitButton } from "@/components/ui/submit-button";
+import { SignOutForm } from "@/components/layout/sign-out-form";
 import { requireUser } from "@/lib/auth/dal";
-import { logout } from "@/modules/auth/actions";
 
 export const metadata: Metadata = { title: "Sem organização" };
 
@@ -31,11 +30,7 @@ export default async function SemOrganizacaoPage() {
               Consulte <code className="text-gold-soft">docs/SETUP.md</code> para
               o procedimento de vínculo do primeiro usuário.
             </p>
-            <form action={logout}>
-              <SubmitButton variant="secondary" pendingLabel="Saindo…">
-                Sair
-              </SubmitButton>
-            </form>
+            <SignOutForm />
           </CardContent>
         </Card>
       </div>
