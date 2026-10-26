@@ -1,87 +1,32 @@
-import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { clientEnv } from "@/lib/env/client";
+import { hasSessionCookie, isPublicPath } from "@/lib/auth/route-access";
 
 /**
  * Proxy (equivalente ao antigo Middleware, renomeado no Next.js 16).
  *
- * Responsabilidades:
- *  1. Renovar a sessão do Supabase a cada requisição (refresh dos cookies).
- *  2. Fazer uma verificação OTIMISTA de rota — redireciona não autenticados
- *     para /login e usuários logados para fora das telas de autenticação.
+ * Verificação OTIMISTA de rota, sem banco: sem cookie de sessão do Better
+ * Auth, rotas protegidas redirecionam para /login. A presença do cookie NÃO
+ * prova nada (pode estar revogado, expirado ou adulterado): a sessão é
+ * conferida no banco pelo DAL (`lib/auth/dal.ts`) em cada página, e os dados
+ * pela RLS — como recomenda a documentação do Next.js.
  *
- * A proteção definitiva mora no DAL e nas políticas de RLS. O proxy é apenas a
- * primeira barreira, como recomenda a documentação do Next.js.
+ * Usuário com cookie nas telas de login/recuperação: decidido pela própria
+ * página, que valida a sessão (com um cookie inválido, redirecionar daqui
+ * criaria um ciclo /login ↔ /visao-geral).
  */
-
-const PUBLIC_PREFIXES = [
-  "/login",
-  "/recuperar-senha",
-  "/redefinir-senha",
-  "/auth",
-];
-
-// Rotas de autenticação das quais um usuário já logado deve ser redirecionado.
-const AUTH_ONLY_PREFIXES = ["/login", "/recuperar-senha"];
-
-function matchesPrefix(pathname: string, prefixes: string[]): boolean {
-  return prefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
-  );
-}
-
-export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
-
-  const supabase = createServerClient(
-    clientEnv.NEXT_PUBLIC_SUPABASE_URL,
-    clientEnv.NEXT_PUBLIC_SUPABASE_ANON_KEY,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => {
-            request.cookies.set(name, value);
-          });
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) => {
-            response.cookies.set(name, value, options);
-          });
-        },
-      },
-    },
-  );
-
-  // IMPORTANTE: não execute código entre createServerClient e getUser().
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
-
-  // Preserva os cookies renovados ao emitir um redirect.
-  const redirectTo = (path: string) => {
-    const url = request.nextUrl.clone();
-    url.pathname = path;
-    const redirect = NextResponse.redirect(url);
-    response.cookies.getAll().forEach((cookie) => {
-      redirect.cookies.set(cookie);
-    });
-    return redirect;
-  };
-
-  if (!user && !matchesPrefix(pathname, PUBLIC_PREFIXES)) {
-    return redirectTo("/login");
+export function proxy(request: NextRequest) {
+  if (
+    isPublicPath(request.nextUrl.pathname) ||
+    hasSessionCookie((name) => request.cookies.get(name)?.value)
+  ) {
+    return NextResponse.next();
   }
 
-  if (user && matchesPrefix(pathname, AUTH_ONLY_PREFIXES)) {
-    return redirectTo("/visao-geral");
-  }
-
-  return response;
+  const url = request.nextUrl.clone();
+  url.pathname = "/login";
+  url.search = "";
+  return NextResponse.redirect(url);
 }
 
 export const config = {
