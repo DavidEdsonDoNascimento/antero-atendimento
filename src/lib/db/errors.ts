@@ -48,3 +48,27 @@ export class DisallowedQueryError extends Error {
     this.name = "DisallowedQueryError";
   }
 }
+
+/**
+ * Acesso negado ao contexto pedido: organização inválida, usuário sem
+ * vínculo ATIVO com ela, ou papel insuficiente para a operação. Mensagem
+ * sempre genérica — não diferencia "não existe" de "não é sua" e nunca ecoa
+ * os identificadores recebidos.
+ */
+export class AccessDeniedError extends Error {
+  constructor() {
+    super("Acesso negado ao contexto solicitado.");
+    this.name = "AccessDeniedError";
+  }
+}
+
+/**
+ * SQLSTATE de um erro vindo do PostgreSQL (`DatabaseError` do `pg`), ou
+ * `undefined` para qualquer outro erro. Checagem estrutural, para os módulos
+ * de domínio tratarem erros do banco sem importar `pg`.
+ */
+export function sqlStateOf(error: unknown): string | undefined {
+  if (!(error instanceof Error)) return undefined;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+}
