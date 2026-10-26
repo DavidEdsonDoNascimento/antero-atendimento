@@ -29,9 +29,11 @@ const PASSWORD_KEYS = [
   "DEV_ADMIN_PASSWORD",
   "DEV_MIGRATOR_PASSWORD",
   "DEV_APP_PASSWORD",
+  "DEV_AUTH_PASSWORD",
   "TEST_ADMIN_PASSWORD",
   "TEST_MIGRATOR_PASSWORD",
   "TEST_APP_PASSWORD",
+  "TEST_AUTH_PASSWORD",
 ];
 const REQUIRED_KEYS = [
   "DEV_DB_PORT",
@@ -159,10 +161,28 @@ function randomPassword() {
 }
 
 const commands = {
-  // Cria .env.infra com senhas aleatórias. Nunca sobrescreve um arquivo existente.
+  // Cria .env.infra com senhas aleatórias. Nunca sobrescreve um arquivo
+  // existente: se ele já existe, só acrescenta as senhas que faltarem (ex.:
+  // DEV_AUTH_PASSWORD, introduzida na Entrega 2) e preserva todo o resto.
   env() {
     if (existsSync(ENV_FILE)) {
-      console.log("[infra] .env.infra já existe — mantido sem alterações.");
+      const current = parseEnvFile(ENV_FILE);
+      const missing = PASSWORD_KEYS.filter((key) => !current[key]);
+      if (missing.length === 0) {
+        console.log("[infra] .env.infra já existe — mantido sem alterações.");
+        return;
+      }
+      let content = readFileSync(ENV_FILE, "utf8");
+      for (const key of missing) {
+        const line = `${key}=${randomPassword()}`;
+        const empty = new RegExp(`^${key}=[ \\t]*$`, "m");
+        content = empty.test(content)
+          ? content.replace(empty, line)
+          : `${content.replace(/\n?$/, "\n")}${line}\n`;
+      }
+      writeFileSync(ENV_FILE, content, { mode: 0o600 });
+      chmodSync(ENV_FILE, 0o600);
+      console.log(`[infra] .env.infra: senhas acrescentadas (${missing.join(", ")}); valores existentes preservados.`);
       return;
     }
     let content = readFileSync(ENV_EXAMPLE, "utf8");
@@ -222,6 +242,41 @@ const commands = {
     const cfg = loadConfig();
     const service = target === "dev" ? "migrate-dev" : "migrate-test";
     run(cfg, ["run", "--rm", "--no-TTY", service, command], { profiles: ["tools", "test"] });
+  },
+
+  // Cria papéis novos e ressincroniza atributos/senhas num banco JÁ
+  // inicializado, rodando o mesmo script idempotente do initdb. Não toca em
+  // dados. O container precisa ter sido (re)criado com as variáveis atuais
+  // (`pnpm infra:up` / `pnpm db:test:up` recriam quando o compose muda).
+  roles([target]) {
+    targetOf(target);
+    const cfg = loadConfig();
+    const service = target === "dev" ? "postgres-dev" : "postgres-test";
+    const profiles = target === "test" ? ["test"] : [];
+    run(cfg, ["exec", "-T", service, "bash", "/docker-entrypoint-initdb.d/10-roles.sh"], { profiles });
+    console.log(`[infra] papéis sincronizados no banco ${target}.`);
+  },
+
+  // Confere, com o planejador de migrations do próprio Better Auth, que o
+  // schema `auth` do alvo corresponde exatamente à configuração versionada
+  // (src/lib/auth/better-auth-options.ts). Conecta como antero_auth — o mesmo
+  // papel que o Better Auth usará — e NUNCA executa migrations.
+  "auth-schema"([target, mode = "check"]) {
+    targetOf(target);
+    if (mode !== "check" && mode !== "print") fail("modo inválido: use `check` ou `print`.");
+    const cfg = loadConfig();
+    const prefix = target === "dev" ? "DEV" : "TEST";
+    const port = cfg[`${prefix}_DB_PORT`];
+    const db = cfg[`${prefix}_DB_NAME`];
+    const result = spawnSync(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", join(ROOT, "scripts", "auth-schema.mjs"), mode], {
+      cwd: ROOT,
+      stdio: "inherit",
+      env: {
+        ...childEnv(cfg),
+        AUTH_SCHEMA_DATABASE_URL: `postgres://antero_auth:${cfg[`${prefix}_AUTH_PASSWORD`]}@127.0.0.1:${port}/${db}?sslmode=disable`,
+      },
+    });
+    if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
   // Cria um arquivo de migration vazio no formato do dbmate.
@@ -286,20 +341,27 @@ const commands = {
 
     const roles = query(
       "select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication, rolcanlogin " +
-        "from pg_roles where rolname in ('antero_owner','antero_migrator','antero_app') order by 1",
+        "from pg_roles where rolname in ('antero_owner','antero_migrator','antero_app','antero_auth') order by 1",
     );
-    check("papéis antero_owner, antero_migrator e antero_app existem", roles.ok && roles.out.split("\n").length === 3);
+    check(
+      "papéis antero_owner, antero_migrator, antero_app e antero_auth existem",
+      roles.ok && roles.out.split("\n").length === 4,
+      "rode `pnpm db:roles` (dev) ou `pnpm db:test:roles` (teste)",
+    );
     const flags = Object.fromEntries(roles.out.split("\n").filter(Boolean).map((l) => {
       const [name, ...rest] = l.split("|");
       return [name, rest];
     }));
     // ordem: super, bypassrls, createrole, createdb, replication, canlogin
-    for (const role of ["antero_owner", "antero_migrator", "antero_app"]) {
+    for (const role of ["antero_owner", "antero_migrator", "antero_app", "antero_auth"]) {
       const f = flags[role] ?? [];
       check(`${role}: sem superusuário/BYPASSRLS/CREATEROLE/CREATEDB/REPLICATION`, f.slice(0, 5).every((v) => v === "f") && f.length === 6);
     }
     check("antero_owner não faz login", (flags.antero_owner ?? [])[5] === "f");
-    check("antero_app e antero_migrator fazem login", (flags.antero_app ?? [])[5] === "t" && (flags.antero_migrator ?? [])[5] === "t");
+    check(
+      "antero_app, antero_auth e antero_migrator fazem login",
+      ["antero_app", "antero_auth", "antero_migrator"].every((r) => (flags[r] ?? [])[5] === "t"),
+    );
 
     const owners = query(
       `select (select pg_get_userbyid(datdba) from pg_database where datname = '${dbName}'), ` +
@@ -308,9 +370,9 @@ const commands = {
     check("banco e schema public pertencem a antero_owner", owners.ok && owners.out === "antero_owner|antero_owner");
 
     const owned = query(
-      "select count(*) from pg_class c join pg_roles r on r.oid = c.relowner where r.rolname = 'antero_app'",
+      "select count(*) from pg_class c join pg_roles r on r.oid = c.relowner where r.rolname in ('antero_app','antero_auth')",
     );
-    check("antero_app não possui nenhum objeto", owned.ok && owned.out === "0");
+    check("antero_app e antero_auth não possuem nenhum objeto", owned.ok && owned.out === "0");
 
     const privs = query(
       "select has_schema_privilege('antero_app','public','CREATE'), " +
@@ -319,6 +381,12 @@ const commands = {
         "has_schema_privilege('public','public','USAGE')",
     );
     check("antero_app não tem CREATE no schema nem no banco; PUBLIC sem CONNECT/USAGE", privs.ok && privs.out === "f|f|f|f");
+
+    const authPrivs = query(
+      "select has_schema_privilege('antero_auth','public','USAGE'), has_schema_privilege('antero_auth','public','CREATE'), " +
+        `has_database_privilege('antero_auth','${dbName}','CREATE'), has_database_privilege('antero_auth','${dbName}','TEMP')`,
+    );
+    check("antero_auth sem USAGE/CREATE em public e sem CREATE/TEMP no banco", authPrivs.ok && authPrivs.out === "f|f|f|f");
 
     const app = query("select current_user, session_user, current_setting('is_superuser')", {
       user: "antero_app",
@@ -332,6 +400,34 @@ const commands = {
       !create.ok && /permission denied/.test(create.err),
       create.err,
     );
+
+    const authLogin = query("select current_user, session_user, current_setting('is_superuser')", {
+      user: "antero_auth",
+      password: cfg[`${prefix}_AUTH_PASSWORD`],
+    });
+    check("antero_auth conecta por TCP e não é superusuário", authLogin.ok && authLogin.out === "antero_auth|antero_auth|off", authLogin.err);
+
+    // Depois da migration 0000: separação entre identidade e aplicação.
+    const authSchema = query("select count(*) from pg_namespace where nspname = 'auth'");
+    if (authSchema.ok && authSchema.out === "1") {
+      const sep = query(
+        "select has_schema_privilege('antero_app','auth','USAGE'), has_schema_privilege('antero_auth','auth','USAGE'), " +
+          "has_schema_privilege('antero_auth','auth','CREATE'), pg_get_userbyid(nspowner) from pg_namespace where nspname = 'auth'",
+      );
+      check(
+        "schema auth: dono antero_owner; antero_auth com USAGE (sem CREATE); antero_app sem acesso",
+        sep.ok && sep.out === "f|t|f|antero_owner",
+        sep.out,
+      );
+      const leak = query("select count(*) from auth.accounts", { user: "antero_app", password: appPassword });
+      check(
+        "antero_app NÃO lê auth.accounts (hashes de senha)",
+        !leak.ok && /permission denied/.test(leak.err),
+        leak.err || leak.out,
+      );
+    } else {
+      console.log("  --   schema auth ainda não existe (migrations pendentes)");
+    }
 
     const migrator = query("select current_user, session_user, current_setting('is_superuser')", {
       user: "antero_migrator",
