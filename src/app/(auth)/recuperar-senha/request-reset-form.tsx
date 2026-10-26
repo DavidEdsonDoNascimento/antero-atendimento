@@ -10,11 +10,11 @@ import { SubmitButton } from "@/components/ui/submit-button";
 import {
   requestPasswordReset,
   type AuthFormState,
-} from "@/modules/auth/actions";
+} from "@/modules/auth/browser-actions";
 
 export function RequestResetForm() {
   const [state, action] = useActionState<AuthFormState, FormData>(
-    requestPasswordReset,
+    (_prev, formData) => requestPasswordReset(formData),
     undefined,
   );
 
@@ -51,6 +51,12 @@ export function RequestResetForm() {
                 placeholder="voce@empresa.com"
               />
             </Field>
+
+            {state?.error && (
+              <p className="text-sm text-red-400" role="alert">
+                {state.error}
+              </p>
+            )}
 
             <SubmitButton className="w-full" pendingLabel="Enviando…">
               Enviar link

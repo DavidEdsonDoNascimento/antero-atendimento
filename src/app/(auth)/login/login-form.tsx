@@ -1,16 +1,25 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useActionState } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Field, Input } from "@/components/ui/field";
 import { SubmitButton } from "@/components/ui/submit-button";
-import { login, type AuthFormState } from "@/modules/auth/actions";
+import {
+  signInWithPassword,
+  type AuthFormState,
+} from "@/modules/auth/browser-actions";
 
 export function LoginForm({ notice }: { notice?: string }) {
+  const router = useRouter();
   const [state, action] = useActionState<AuthFormState, FormData>(
-    login,
+    async (_prev, formData) => {
+      const result = await signInWithPassword(formData);
+      if (result.redirectTo) router.replace(result.redirectTo);
+      return result.state;
+    },
     undefined,
   );
 

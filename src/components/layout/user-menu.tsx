@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { IconChevronDown, IconLogout, IconSettings } from "@/components/ui/icons";
-import { logout } from "@/modules/auth/actions";
+import { signOut } from "@/modules/auth/browser-actions";
 
 function initialsOf(fullName: string, email: string): string {
   const source = fullName.trim() || email;
@@ -75,7 +75,7 @@ export function UserMenu({
             <IconSettings className="size-4" />
             Configurações
           </Link>
-          <form action={logout}>
+          <form action={signOut}>
             <button
               type="submit"
               role="menuitem"
