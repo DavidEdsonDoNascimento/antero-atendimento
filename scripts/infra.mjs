@@ -138,7 +138,7 @@ function nodeChildEnv(cfg, extra) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (
-      /^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|DB_TEST_|AUTH_SCHEMA_)/.test(key) ||
+      /^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|DB_TEST_|AUTH_SCHEMA_|BETTER_AUTH_|AUTH_TRUSTED_|SMTP_|MAIL_)/.test(key) ||
       key === "DATABASE_URL" ||
       key in cfg
     ) {
@@ -151,6 +151,22 @@ function nodeChildEnv(cfg, extra) {
 
 function testUrl(cfg, role, password) {
   return `postgres://${role}:${password}@127.0.0.1:${cfg.TEST_DB_PORT}/${cfg.TEST_DB_NAME}`;
+}
+
+// Identidade (Better Auth) LOCAL: banco do alvo como antero_auth, origem em
+// localhost, segredo aleatório a cada execução (nunca gravado) e e-mails no
+// Mailpit. Nenhuma credencial de outro ambiente.
+function localIdentityEnv(cfg, target) {
+  const prefix = target === "dev" ? "DEV" : "TEST";
+  return {
+    AUTH_DATABASE_URL: `postgres://antero_auth:${cfg[`${prefix}_AUTH_PASSWORD`]}@127.0.0.1:${cfg[`${prefix}_DB_PORT`]}/${cfg[`${prefix}_DB_NAME`]}`,
+    BETTER_AUTH_URL: "http://localhost:3000",
+    BETTER_AUTH_SECRET: randomBytes(32).toString("base64url"),
+    SMTP_HOST: "127.0.0.1",
+    SMTP_PORT: cfg.MAILPIT_SMTP_PORT,
+    SMTP_SECURE: "false",
+    MAIL_FROM: "Antero Atendimento <nao-responda@antero.local>",
+  };
 }
 
 function compose(cfg, args, { profiles = [], capture = false, input } = {}) {
@@ -297,6 +313,32 @@ const commands = {
         AUTH_SCHEMA_DATABASE_URL: `postgres://antero_auth:${cfg[`${prefix}_AUTH_PASSWORD`]}@127.0.0.1:${port}/${db}?sslmode=disable`,
       }),
     });
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  },
+
+  // Provisiona uma identidade fictícia LOCAL (sem cadastro público): usa o
+  // fluxo oficial do Better Auth numa instância privada, conectando como
+  // antero_auth no banco do alvo. Repetível por e-mail. A senha gerada é
+  // mostrada uma única vez e não é gravada. Ver docs/AUTH.md.
+  //   pnpm auth:provision test --email a@exemplo.local --name "Nome" [--rotate-password]
+  "auth-provision"([target, ...args]) {
+    targetOf(target);
+    const cfg = loadConfig();
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--conditions=react-server",
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        join(ROOT, "scripts", "auth-provision.mjs"),
+        ...args,
+      ],
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: nodeChildEnv(cfg, { NODE_ENV: "development", ...localIdentityEnv(cfg, target) }),
+      },
+    );
+    if (result.error) fail(`não foi possível executar o provisionamento: ${result.error.message}`);
     if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
