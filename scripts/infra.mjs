@@ -13,10 +13,21 @@
 //
 // Sem dependências além do Node e do CLI do Docker. Nunca imprime senhas.
 
-import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
+import {
+  chmodSync,
+  cpSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir } from "node:os";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -153,20 +164,143 @@ function testUrl(cfg, role, password) {
   return `postgres://${role}:${password}@127.0.0.1:${cfg.TEST_DB_PORT}/${cfg.TEST_DB_NAME}`;
 }
 
+/** URL local do alvo (`dev`/`test`) para um papel; a senha vem de .env.infra. */
+function targetUrl(cfg, target, role) {
+  const prefix = target === "dev" ? "DEV" : "TEST";
+  const key = { antero_app: "APP", antero_auth: "AUTH", antero_migrator: "MIGRATOR" }[role];
+  return `postgres://${role}:${cfg[`${prefix}_${key}_PASSWORD`]}@127.0.0.1:${cfg[`${prefix}_DB_PORT`]}/${cfg[`${prefix}_DB_NAME`]}`;
+}
+
 // Identidade (Better Auth) LOCAL: banco do alvo como antero_auth, origem em
 // localhost, segredo aleatório a cada execução (nunca gravado) e e-mails no
 // Mailpit. Nenhuma credencial de outro ambiente.
-function localIdentityEnv(cfg, target) {
-  const prefix = target === "dev" ? "DEV" : "TEST";
+function localIdentityEnv(cfg, target, baseURL = "http://localhost:3000") {
   return {
-    AUTH_DATABASE_URL: `postgres://antero_auth:${cfg[`${prefix}_AUTH_PASSWORD`]}@127.0.0.1:${cfg[`${prefix}_DB_PORT`]}/${cfg[`${prefix}_DB_NAME`]}`,
-    BETTER_AUTH_URL: "http://localhost:3000",
+    AUTH_DATABASE_URL: targetUrl(cfg, target, "antero_auth"),
+    BETTER_AUTH_URL: baseURL,
     BETTER_AUTH_SECRET: randomBytes(32).toString("base64url"),
     SMTP_HOST: "127.0.0.1",
     SMTP_PORT: cfg.MAILPIT_SMTP_PORT,
     SMTP_SECURE: "false",
     MAIL_FROM: "Antero Atendimento <nao-responda@antero.local>",
   };
+}
+
+// ---------------------------------------------------------------------------
+// Aplicação local isolada (Entrega 5B)
+//
+// O `.env.local` do repositório ainda aponta para o Supabase remoto, e o
+// Next.js carrega `.env*` do diretório do projeto. Por isso a aplicação local
+// NUNCA roda no repositório: roda numa CÓPIA da árvore de trabalho em
+// ~/.cache/antero-atendimentos/app-<alvo>, sem nenhum arquivo `.env*`, com
+// dependências instaladas do store local do pnpm (`--offline`) e só as
+// variáveis montadas aqui: PostgreSQL local (antero_app/antero_auth), origem
+// http://127.0.0.1:<porta>, segredo aleatório por execução e Mailpit.
+// Variáveis do shell com cara de Supabase/Next públicas são descartadas.
+// ---------------------------------------------------------------------------
+
+const APP_PORTS = { dev: 3460, test: 3461 };
+const APP_CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "antero-atendimentos");
+const ENV_FILE_PATTERN = /(^|\/)\.env/;
+
+function appDir(target) {
+  return join(APP_CACHE, `app-${target}`);
+}
+
+/** Copia a árvore de trabalho (arquivos versionados + novos não ignorados), sem `.env*`. */
+function syncAppCopy(cfg, target) {
+  const dir = appDir(target);
+  const listed = spawnSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
+    cwd: ROOT,
+    encoding: "utf8",
+  });
+  if (listed.status !== 0) fail("não foi possível listar os arquivos do repositório (git ls-files).");
+  const files = listed.stdout
+    .split("\0")
+    .filter((file) => file && !ENV_FILE_PATTERN.test(file) && existsSync(join(ROOT, file)));
+  const wanted = new Set(files);
+  mkdirSync(dir, { recursive: true });
+  for (const file of files) {
+    const from = join(ROOT, file);
+    const to = join(dir, file);
+    const source = statSync(from);
+    if (existsSync(to)) {
+      const copy = statSync(to);
+      if (copy.size === source.size && copy.mtimeMs === source.mtimeMs) continue;
+    }
+    mkdirSync(dirname(to), { recursive: true });
+    cpSync(from, to, { preserveTimestamps: true });
+  }
+  // Remove da cópia o que não existe mais no repositório.
+  const prune = (current) => {
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const path = join(current, entry.name);
+      const rel = relative(dir, path);
+      if (rel === "node_modules" || rel === ".next" || rel === ".antero-lock") continue;
+      if (entry.isDirectory()) prune(path);
+      else if (!wanted.has(rel)) rmSync(path);
+    }
+  };
+  prune(dir);
+  const stray = readdirSync(dir).filter((name) => name.startsWith(".env"));
+  if (stray.length > 0) fail(`a cópia isolada contém arquivos de ambiente (${stray.join(", ")}). Abortado.`);
+
+  // Dependências: as do lockfile, do store local (sem rede), reinstaladas só quando o lockfile muda.
+  const lockHash = createHash("sha256").update(readFileSync(join(dir, "pnpm-lock.yaml"))).digest("hex");
+  const stamp = join(dir, ".antero-lock");
+  if (!existsSync(join(dir, "node_modules")) || !existsSync(stamp) || readFileSync(stamp, "utf8") !== lockHash) {
+    const install = spawnSync("pnpm", ["install", "--frozen-lockfile", "--offline"], {
+      cwd: dir,
+      stdio: "inherit",
+      env: appChildEnv(cfg, {}),
+    });
+    if (install.status !== 0) fail("pnpm install --offline falhou na cópia isolada.");
+    writeFileSync(stamp, lockHash);
+  }
+  return dir;
+}
+
+/**
+ * Ambiente de um processo da aplicação isolada: o do shell SEM nada que
+ * redirecione conexões (ver nodeChildEnv), sem variáveis de Supabase/Next e
+ * sem NODE_ENV/NODE_OPTIONS herdados; depois, só `extra`.
+ */
+function appChildEnv(cfg, extra) {
+  const env = nodeChildEnv(cfg, {});
+  for (const key of Object.keys(env)) {
+    if (/^(NEXT_PUBLIC_|SUPABASE_|NEXT_|NODE_OPTIONS$|NODE_ENV$)/.test(key)) delete env[key];
+  }
+  return { ...env, ...extra, NEXT_TELEMETRY_DISABLED: "1" };
+}
+
+function appServerEnv(cfg, target, port) {
+  return appChildEnv(cfg, {
+    APP_DATABASE_URL: targetUrl(cfg, target, "antero_app"),
+    ...localIdentityEnv(cfg, target, `http://127.0.0.1:${port}`),
+  });
+}
+
+function appPort(target, value) {
+  const port = Number(value ?? APP_PORTS[target]);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) fail("porta inválida.");
+  const busy = spawnSync("ss", ["-Hltn", `sport = :${port}`], { encoding: "utf8" });
+  if (busy.status === 0 && busy.stdout.trim()) fail(`a porta ${port} já está em uso — escolha outra.`);
+  return port;
+}
+
+async function waitForApp(baseURL, child, timeoutMs = 120_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (child.exitCode !== null) fail("o servidor da aplicação encerrou antes de ficar pronto.");
+    try {
+      const response = await fetch(`${baseURL}/login`, { redirect: "manual" });
+      if (response.status === 200) return;
+    } catch {
+      // ainda subindo
+    }
+    await new Promise((done) => setTimeout(done, 500));
+  }
+  fail("o servidor da aplicação não respondeu a tempo.");
 }
 
 function compose(cfg, args, { profiles = [], capture = false, input } = {}) {
@@ -381,6 +515,147 @@ const commands = {
     if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
+  // Fixtures fictícias e idempotentes no banco de DESENVOLVIMENTO local
+  // (identidades pelo Better Auth + organizações, conversas e mensagens).
+  // Não sobrescreve nada: ver scripts/dev-fixtures.mjs.
+  //   pnpm db:dev-fixtures [--rotate-passwords]
+  "dev-fixtures"(args) {
+    const cfg = loadConfig();
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--conditions=react-server",
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        join(ROOT, "scripts", "dev-fixtures.mjs"),
+        ...args,
+      ],
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: nodeChildEnv(cfg, {
+          NODE_ENV: "development",
+          ...localIdentityEnv(cfg, "dev", `http://127.0.0.1:${APP_PORTS.dev}`),
+          DEV_FIXTURE_URL: targetUrl(cfg, "dev", "antero_migrator"),
+          DEV_EXPECTED_DATABASE: cfg.DEV_DB_NAME,
+          DEV_EXPECTED_PORT: cfg.DEV_DB_PORT,
+        }),
+      },
+    );
+    if (result.error) fail(`não foi possível executar as fixtures: ${result.error.message}`);
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  },
+
+  // Aplicação Next.js local e isolada (ver "Aplicação local isolada" acima).
+  //   pnpm app:dev [porta]   → banco de desenvolvimento, http://127.0.0.1:3460
+  async app([target, port]) {
+    targetOf(target);
+    const cfg = loadConfig();
+    const resolvedPort = appPort(target, port);
+    const dir = syncAppCopy(cfg, target);
+    console.log(`[infra] aplicação isolada (${target}) em http://127.0.0.1:${resolvedPort} — cópia ${dir}`);
+    const child = spawn(join(dir, "node_modules", ".bin", "next"), ["dev", "--hostname", "127.0.0.1", "--port", String(resolvedPort)], {
+      cwd: dir,
+      stdio: "inherit",
+      env: appServerEnv(cfg, target, resolvedPort),
+    });
+    const stop = () => child.kill("SIGTERM");
+    process.on("SIGINT", stop);
+    process.on("SIGTERM", stop);
+    await new Promise((done) => child.on("exit", done));
+  },
+
+  // Testes ponta a ponta contra a aplicação isolada REAL (proxy, rota
+  // /api/auth, DAL, páginas e consultas SQL) sobre o banco de TESTES:
+  // sobe o servidor, roda tests/e2e/*.test.ts e o encerra.
+  //   pnpm app:e2e
+  async "app-e2e"() {
+    const cfg = loadConfig();
+    const port = appPort("test");
+    const baseURL = `http://127.0.0.1:${port}`;
+    const dir = syncAppCopy(cfg, "test");
+    const env = appServerEnv(cfg, "test", port);
+    const child = spawn(join(dir, "node_modules", ".bin", "next"), ["dev", "--hostname", "127.0.0.1", "--port", String(port)], {
+      cwd: dir,
+      stdio: ["ignore", "inherit", "inherit"],
+      env,
+      detached: true,
+    });
+    const stop = () => {
+      try {
+        process.kill(-child.pid, "SIGTERM");
+      } catch {
+        // já encerrado
+      }
+    };
+    process.on("exit", stop);
+    try {
+      await waitForApp(baseURL, child);
+      const result = spawnSync(
+        process.execPath,
+        [
+          "--conditions=react-server",
+          "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+          "--import=./tests/db/register-aliases.mjs",
+          "--test",
+          "--test-concurrency=1",
+          "tests/e2e/*.test.ts",
+        ],
+        {
+          cwd: ROOT,
+          stdio: "inherit",
+          env: nodeChildEnv(cfg, {
+            NODE_ENV: "test",
+            E2E_BASE_URL: baseURL,
+            // Mesmas variáveis do servidor (mesmo segredo: os testes leem a
+            // sessão como o DAL) + as de fixture do banco de testes.
+            AUTH_DATABASE_URL: env.AUTH_DATABASE_URL,
+            BETTER_AUTH_URL: env.BETTER_AUTH_URL,
+            BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
+            SMTP_HOST: env.SMTP_HOST,
+            SMTP_PORT: env.SMTP_PORT,
+            SMTP_SECURE: env.SMTP_SECURE,
+            MAIL_FROM: env.MAIL_FROM,
+            DB_TEST_MAILPIT_URL: `http://127.0.0.1:${cfg.MAILPIT_UI_PORT}`,
+            APP_DATABASE_URL: testUrl(cfg, "antero_app", cfg.TEST_APP_PASSWORD),
+            DB_TEST_FIXTURE_URL: testUrl(cfg, "antero_migrator", cfg.TEST_MIGRATOR_PASSWORD),
+            DB_TEST_AUTH_URL: testUrl(cfg, "antero_auth", cfg.TEST_AUTH_PASSWORD),
+            DB_TEST_EXPECTED_DATABASE: cfg.TEST_DB_NAME,
+            DB_TEST_EXPECTED_PORT: cfg.TEST_DB_PORT,
+          }),
+        },
+      );
+      process.exitCode = result.status ?? 1;
+    } finally {
+      stop();
+    }
+  },
+
+  // Build de produção ISOLADO: cópia da árvore de trabalho (sem `.env*`) num
+  // container sem rede (`--network none`), sem nenhuma variável de ambiente
+  // da aplicação. Prova que o build não depende de internet nem de segredos.
+  //   pnpm app:build
+  "app-build"() {
+    assertLocalDocker();
+    const cfg = loadConfig();
+    const dir = syncAppCopy(cfg, "build");
+    rmSync(join(dir, ".next"), { recursive: true, force: true });
+    const user = `${process.getuid()}:${process.getgid()}`;
+    const result = spawnSync(
+      "docker",
+      [
+        "run", "--rm", "--network", "none", "--user", user,
+        "-e", "NEXT_TELEMETRY_DISABLED=1", "-e", "HOME=/tmp",
+        "-v", `${dir}:/app`, "-w", "/app",
+        "node:24-bookworm-slim",
+        "node", "node_modules/next/dist/bin/next", "build",
+      ],
+      { stdio: "inherit" },
+    );
+    if (result.error) fail(`não foi possível executar o docker: ${result.error.message}`);
+    if (result.status !== 0) process.exit(result.status ?? 1);
+    console.log(`[infra] build isolado concluído em ${dir}/.next (sem rede, sem .env).`);
+  },
+
   // Cria um arquivo de migration vazio no formato do dbmate.
   new([name]) {
     if (!name || !/^[a-z0-9_]+$/.test(name)) {
@@ -553,4 +828,4 @@ if (!name || !(name in commands)) {
   console.error(`Uso: node scripts/infra.mjs <${Object.keys(commands).join("|")}> [args]`);
   process.exit(2);
 }
-commands[name](rest);
+await commands[name](rest);

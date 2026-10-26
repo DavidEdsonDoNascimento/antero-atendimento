@@ -32,7 +32,11 @@
     "db:test:auth-schema": "node scripts/infra.mjs auth-schema test",
     "db:test:pgtap": "node scripts/infra.mjs pgtap",
     "db:test:integration": "node scripts/infra.mjs integration",
-    "auth:provision": "node scripts/infra.mjs auth-provision"
+    "auth:provision": "node scripts/infra.mjs auth-provision",
+    "db:dev-fixtures": "node scripts/infra.mjs dev-fixtures",
+    "app:dev": "node scripts/infra.mjs app dev",
+    "app:e2e": "node scripts/infra.mjs app-e2e",
+    "app:build": "node scripts/infra.mjs app-build"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",
