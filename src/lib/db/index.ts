@@ -5,9 +5,8 @@ import "server-only";
  * resto do código: importe de `@/lib/db`, nunca dos arquivos internos nem do
  * `pg` diretamente (regra `no-restricted-imports` em eslint.config.mjs).
  *
- * Ainda não é usada pelas rotas: as consultas SQL paralelas
- * (`modules/<domínio>/sql-queries.ts`, Entrega 4) só serão ligadas às páginas junto
- * com a autenticação própria (Entrega 5).
+ * Usada pelas consultas `modules/<domínio>/sql-queries.ts` com o `userId` da
+ * sessão validada pelo DAL (`lib/auth/dal.ts`, Entrega 5B).
  */
 export { withUserTransaction } from "./transaction.ts";
 export { withOrganizationTransaction, type OrganizationContext } from "./organization.ts";

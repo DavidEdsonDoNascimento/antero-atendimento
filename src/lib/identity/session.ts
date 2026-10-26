@@ -13,7 +13,7 @@ import { IdentityUnavailableError } from "./errors.ts";
  * para `withUserTransaction`/`withOrganizationTransaction`. O id é o mesmo
  * UUID de `public.profiles.id` (gatilho `handle_new_user`).
  *
- * Fluxo previsto para a Entrega 5B (DAL):
+ * Fluxo do DAL (`lib/auth/dal.ts`):
  *   session = await getValidatedSession(await headers())     → null: /login
  *   context = await getActiveContext({ userId: session.userId })
  *                                       (modules/organizations/sql-queries)

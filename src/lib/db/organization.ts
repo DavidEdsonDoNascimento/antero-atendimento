@@ -11,8 +11,8 @@ import type { DbTransaction } from "./types";
 /**
  * Identidade + organização de uma requisição. Os dois valores precisam vir
  * do servidor: `userId` de uma sessão validada e `organizationId` da
- * associação ativa desse usuário (Entrega 5: sessão Better Auth +
- * organização ativa). Nunca de parâmetro, cookie ou corpo enviados pelo
+ * associação ativa desse usuário (DAL: sessão Better Auth +
+ * `getActiveContext`). Nunca de parâmetro, cookie ou corpo enviados pelo
  * navegador — um UUID não prova nada.
  */
 export type OrganizationContext = {

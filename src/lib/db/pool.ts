@@ -14,7 +14,7 @@ import { pgTimestampToIso, pgTimestamptzToIso } from "./timestamps.ts";
  * Uso interno de `src/lib/db`: o resto do código passa por
  * `withUserTransaction` (transaction.ts), nunca pelo pool direto (regra
  * `no-restricted-imports` em eslint.config.mjs). O pool do Better Auth
- * (`antero_auth`) é outro e só entra na Entrega 5.
+ * (`antero_auth`, `src/lib/identity/pool.ts`) é outro.
  *
  * Ciclo de vida:
  * - criado na primeira utilização (não no import), a partir de variáveis de

@@ -5,10 +5,10 @@ import type { ActiveContext } from "@/lib/auth/dal";
 import type { MemberRole, Organization, Profile } from "@/lib/types/database";
 
 /**
- * Consultas de organização sobre o PostgreSQL próprio (Entrega 4) —
- * PARALELAS a `queries.ts` (Supabase) e ao `getActiveContext` de
- * `lib/auth/dal.ts`, que continuam sendo os usados pelas rotas até a
- * Entrega 5. O `userId` precisa vir de uma sessão validada no servidor.
+ * Consultas de organização sobre o PostgreSQL próprio (Entrega 4; usadas
+ * pelo DAL e pelas rotas desde a Entrega 5B — `queries.ts` é o legado
+ * Supabase, sem uso). O `userId` precisa vir de uma sessão validada no
+ * servidor.
  *
  * Colunas sempre explícitas (nunca `*`): uma coluna nova na tabela não passa
  * a sair daqui sem revisão.
@@ -48,11 +48,11 @@ export async function listAllOrganizations(context: { userId: string }): Promise
 type ActiveMembershipRow = Organization & { role: MemberRole };
 
 /**
- * Contexto ativo do usuário (perfil + organização + papel) — mesma regra de
- * `getActiveContext` em `lib/auth/dal.ts`: a associação ATIVA mais antiga
+ * Contexto ativo do usuário (perfil + organização + papel) — a regra do
+ * MVP, a mesma da versão Supabase: a associação ATIVA mais antiga
  * (`created_at`, desempate por `id`); `null` sem perfil ou sem associação
- * ativa. É daqui que a Entrega 5 tira o `organizationId` do
- * `OrganizationContext` — nunca do navegador.
+ * ativa. É daqui que o DAL (`lib/auth/dal.ts#getActiveContext`) tira o
+ * `organizationId` do `OrganizationContext` — nunca do navegador.
  */
 export async function getActiveContext(context: { userId: string }): Promise<ActiveContext | null> {
   try {

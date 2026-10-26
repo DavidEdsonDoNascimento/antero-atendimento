@@ -62,10 +62,9 @@ function assertAllowed(text: string, values: readonly unknown[]): void {
  *   ela é DESCARTADA, não devolvida ao pool.
  *
  * SEGURANÇA: `userId` NÃO é prova de autenticação. Ele deve vir
- * exclusivamente de uma sessão validada no servidor (Better Auth, Entrega 5)
+ * exclusivamente de uma sessão validada no servidor (Better Auth, via DAL)
  * — nunca de parâmetro de rota, formulário, cookie não verificado ou corpo de
- * requisição. Até lá, não use este helper em rotas públicas nem Server
- * Actions. Sem `userId` válido não há transação (InvalidUserContextError),
+ * requisição. Sem `userId` válido não há transação (InvalidUserContextError),
  * e não existe fallback para administrador.
  *
  * Não aninhe chamadas (cada uma usa sua própria conexão e transação).

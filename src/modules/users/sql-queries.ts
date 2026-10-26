@@ -1,16 +1,37 @@
 import "server-only";
 
-import { sqlStateOf, withOrganizationTransaction, type OrganizationContext } from "@/lib/db";
-import type { MemberRole, MemberStatus } from "@/lib/types/database";
+import { sqlStateOf, withOrganizationTransaction, withUserTransaction, type OrganizationContext } from "@/lib/db";
+import type { MemberRole, MemberStatus, Profile } from "@/lib/types/database";
 
-import type { OrganizationMemberRow } from "./queries";
+import type { OrganizationMemberRow } from "./types";
 
 /**
- * Consultas de membros sobre o PostgreSQL próprio (Entrega 4) — PARALELAS a
- * `queries.ts` (Supabase), que continua sendo a usada pelas rotas até a
- * Entrega 5. Só leitura: gestão de membros não faz parte desta etapa (ver a
- * pendência de regras de administração em docs/DATABASE.md).
+ * Consultas de usuários e membros sobre o PostgreSQL próprio (usadas pelas
+ * rotas desde a Entrega 5B; `queries.ts` é o legado Supabase, sem uso). Só
+ * leitura: gestão de membros não faz parte desta etapa (ver a pendência de
+ * regras de administração em docs/DATABASE.md).
  */
+
+/**
+ * Perfil do PRÓPRIO usuário da sessão (`null` se ainda não existir). O
+ * `userId` precisa vir de uma sessão validada no servidor; a RLS de
+ * `profiles` também restringe o que ele enxerga.
+ */
+export async function getOwnProfile(context: { userId: string }): Promise<Profile | null> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<Profile>(
+        `SELECT p.id, p.email, p.full_name, p.is_platform_admin, p.created_at, p.updated_at
+         FROM public.profiles p WHERE p.id = $1::uuid`,
+        [context.userId],
+      );
+      return rows[0] ?? null;
+    });
+  } catch (error) {
+    if (sqlStateOf(error) === undefined) throw error;
+    throw new Error(`Falha ao carregar perfil: ${(error as Error).message}`, { cause: error });
+  }
+}
 
 type MemberSqlRow = {
   id: string;

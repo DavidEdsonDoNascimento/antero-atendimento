@@ -1,19 +1,10 @@
 import "server-only";
 
 import { createClient } from "@/lib/supabase/server";
-import type { MemberRole, MemberStatus } from "@/lib/types/database";
 
-export type OrganizationMemberRow = {
-  id: string;
-  role: MemberRole;
-  status: MemberStatus;
-  created_at: string;
-  profile: {
-    id: string;
-    full_name: string | null;
-    email: string;
-  } | null;
-};
+import type { OrganizationMemberRow } from "./types";
+
+export type { OrganizationMemberRow };
 
 /**
  * Lista os membros de uma organização com nome e e-mail (do perfil).

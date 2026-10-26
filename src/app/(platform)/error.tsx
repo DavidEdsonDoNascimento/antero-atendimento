@@ -7,10 +7,10 @@ import { Card, CardContent } from "@/components/ui/card";
 
 export default function PlatformError({
   error,
-  reset,
+  retry,
 }: {
   error: Error & { digest?: string };
-  reset: () => void;
+  retry: () => void;
 }) {
   useEffect(() => {
     // Registra o erro no servidor/observabilidade sem expor dados sensíveis.
@@ -28,7 +28,7 @@ export default function PlatformError({
             Não foi possível carregar esta página. Tente novamente.
           </p>
         </div>
-        <Button variant="secondary" onClick={reset}>
+        <Button variant="secondary" onClick={() => retry()}>
           Tentar novamente
         </Button>
       </CardContent>

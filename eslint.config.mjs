@@ -36,14 +36,6 @@ const identityInternals = {
     "Use só handler/session/client/constants/errors de `@/lib/identity`: login e senha passam pelo handler HTTP (rate limit e CSRF).",
 };
 
-// Entrega 4: as consultas SQL paralelas ainda não podem ser ligadas a
-// rotas, actions ou ao DAL. A Entrega 5B remove esta restrição ao trocar
-// `queries.ts` por `sql-queries.ts`.
-const sqlQueries = {
-  group: ["**/sql-queries", "**/sql-queries.ts"],
-  message: "Camada SQL paralela (Entrega 4): só será ativada na Entrega 5, junto com o Better Auth.",
-};
-
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -53,7 +45,7 @@ const eslintConfig = defineConfig([
     rules: {
       "no-restricted-imports": [
         "error",
-        { paths: [restrictedPg], patterns: [dbInternals, identityInternals, sqlQueries] },
+        { paths: [restrictedPg], patterns: [dbInternals, identityInternals] },
       ],
     },
   },
@@ -62,7 +54,7 @@ const eslintConfig = defineConfig([
   {
     files: ["src/lib/identity/**/*.{ts,tsx,js,jsx,mjs}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [dbInternals, sqlQueries] }],
+      "no-restricted-imports": ["error", { patterns: [dbInternals] }],
     },
   },
   // Override default ignores of eslint-config-next.
