@@ -300,10 +300,12 @@ const commands = {
     if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
-  // Testes de integração da camada PostgreSQL (src/lib/db) — SEMPRE contra o
-  // banco de TESTES. O processo de teste recebe só as URLs desse banco
-  // (antero_app para a camada; antero_migrator e antero_auth para fixtures) e
-  // ainda confirma no servidor que é o banco descartável antes de escrever.
+  // Testes de integração da camada PostgreSQL (src/lib/db) e das consultas
+  // SQL dos módulos (modules/*/sql-queries.ts) — SEMPRE contra o banco de
+  // TESTES. O processo de teste recebe só as URLs desse banco (antero_app para
+  // a camada; antero_migrator e antero_auth para fixtures) e ainda confirma no
+  // servidor que é o banco descartável antes de escrever. O alias `@/` é
+  // resolvido por tests/db/register-aliases.mjs.
   integration() {
     const cfg = loadConfig();
     const result = spawnSync(
@@ -311,6 +313,7 @@ const commands = {
       [
         "--conditions=react-server",
         "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        "--import=./tests/db/register-aliases.mjs",
         "--test",
         "--test-concurrency=1",
         "tests/db/*.test.ts",

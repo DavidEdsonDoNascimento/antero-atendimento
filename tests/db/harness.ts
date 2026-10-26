@@ -127,6 +127,27 @@ async function createUser(auth: pg.Client, email: string, name: string): Promise
 }
 
 /**
+ * Identidades extras (como o Better Auth faria: INSERT em auth.users por
+ * antero_auth), com o mesmo sufixo das fixtures. Quem cria remove.
+ */
+export async function createExtraUsers<K extends string>(
+  suffix: string,
+  names: Record<K, string>,
+): Promise<Record<K, string>> {
+  const auth = new pg.Client({ connectionString: targets.authUrl });
+  await auth.connect();
+  try {
+    const ids = {} as Record<K, string>;
+    for (const [key, name] of Object.entries(names) as [K, string][]) {
+      ids[key] = await createUser(auth, `${key.toLowerCase()}.${suffix}@teste.local`, name);
+    }
+    return ids;
+  } finally {
+    await auth.end();
+  }
+}
+
+/**
  * Duas organizações (A e B), cada uma com conta de WhatsApp, contato,
  * conversa e uma mensagem; membros de A em vários papéis/status, dono de B e
  * um usuário sem organização.
