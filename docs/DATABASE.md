@@ -380,3 +380,136 @@ const rows = await withUserTransaction(sessionUserId, async (tx) => {
 - Timestamps chegam como string ISO com microssegundos, no mesmo formato do
   PostgREST (`2026-10-26T13:45:12.123456+00:00`); passe-os de volta como
   string nos parâmetros (`$1::timestamptz`).
+
+## Consultas SQL da aplicação (Entrega 4)
+
+Camada de leitura **paralela** ao Supabase: as rotas continuam usando
+`modules/*/queries.ts` (PostgREST) e `lib/auth/dal.ts` até a Entrega 5. Uma
+regra de lint (`eslint.config.mjs`) impede importar `sql-queries` em rotas,
+actions ou no DAL antes disso.
+
+### Contexto de organização
+
+```ts
+import { withOrganizationTransaction } from "@/lib/db";
+
+await withOrganizationTransaction({ userId, organizationId }, async (tx) => { … });
+```
+
+`withUserTransaction` + `SELECT public.is_org_member($1)` na mesma
+transação: sem vínculo **ativo** (desativado, sem organização, outra
+empresa, id inexistente ou inválido) → `AccessDeniedError` genérico antes do
+callback. `userId` precisa vir de uma sessão validada e `organizationId` da
+associação ativa desse usuário (`getActiveContext` abaixo) — nunca do
+navegador. As consultas mantêm a RLS e ainda filtram `organization_id`
+explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
+(testado).
+
+### Funções disponíveis
+
+| Módulo (`sql-queries.ts`) | Função | Equivale a |
+| --- | --- | --- |
+| `conversations` | `listConversations(ctx, params)` | `queries.ts#listConversations(organizationId, params)` |
+| `conversations` | `getConversationDetail(ctx, id)` | `queries.ts#getConversationDetail` |
+| `conversations` | `listConversationMessages(ctx, id, params)` | `queries.ts#listConversationMessages` |
+| `organizations` | `getActiveContext({ userId })` | `lib/auth/dal.ts#getActiveContext` (sem `cache`/`redirect`) |
+| `organizations` | `listAllOrganizations({ userId })` | `queries.ts#listAllOrganizations` |
+| `users` | `listOrganizationMembers(ctx)` | `queries.ts#listOrganizationMembers(organizationId)` |
+| `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | `queries.ts#getPrimaryWhatsappAccount(organizationId)` |
+
+`ctx` = `{ userId, organizationId }` (`OrganizationContext`). Mesmos nomes,
+mesmos demais parâmetros e mesmos tipos de retorno: a troca na Entrega 5 é o
+caminho do import + o primeiro argumento. O SQL da Inbox fica em
+`modules/conversations/sql.ts` (puro, testado sem banco); `cursor.ts`,
+`pagination.ts`, `mappers.ts`, `rows.ts` e `types.ts` não mudaram.
+
+### Equivalência com o PostgREST
+
+- Embeds → JOINs pelas mesmas FKs compostas: contato e canal (JOIN),
+  atendente e perfil (LEFT JOIN), última mensagem por `LEFT JOIN LATERAL`
+  pela FK tripla de `messages`. As linhas são remontadas no formato de
+  `rows.ts` (`last_message` como array de 0/1 item).
+- Os testes geram as linhas exatamente como o PostgREST as montava
+  (subconsultas JSON executadas sob a RLS do usuário), passam pelos mesmos
+  mapeadores e comparam item a item com o resultado SQL.
+- Erros: `InvalidCursorError` e `ConversationQueryError` como antes (o
+  `DatabaseError` original fica em `cause`); contexto inválido →
+  `AccessDeniedError`/`InvalidUserContextError`. As consultas auxiliares
+  lançam `Error` com o mesmo prefixo de mensagem das atuais.
+
+Diferenças deliberadas (todas cobertas por teste):
+
+1. **Atendente desativado**: a RLS de `profiles` (`shares_org_with`) oculta
+   o perfil de quem não tem vínculo ativo. O PostgREST devolvia
+   `assigned_member.profile = null` e `mapAssignee` quebrava com `TypeError`
+   (**defeito latente no fluxo atual**: uma conversa atribuída a alguém
+   depois desativado derruba a Inbox e o detalhe). No SQL o atendente sai
+   com `fullName: null` e o mapeador fica igual.
+2. **Última mensagem com empate exato** em `created_at`: o PostgREST
+   ordenava só por `created_at` (resultado indefinido); o SQL desempata por
+   `id DESC`, igual à última linha do histórico.
+3. **Desempate por `id`** também em membros (`created_at, id`), conta
+   principal e lista de organizações.
+4. **Cursor bem formado, mas recusado pelo PostgreSQL** como timestamp (ex.:
+   ano `0000`, aceito pelo formato ISO): `InvalidCursorError` (o loader
+   volta à primeira página) em vez de erro de consulta.
+5. **`listAllOrganizations`**: o papel de administrador da plataforma é
+   conferido no banco; quem não é recebe `AccessDeniedError` (a RLS sozinha
+   devolveria as próprias organizações). A página `/admin` já exige o papel.
+6. Colunas sempre explícitas (nunca `*`): uma coluna nova (ex.: credencial
+   da Meta em `whatsapp_accounts`) não passa a sair sem revisão.
+
+### Paginação
+
+- `last_message_at` e `messages.created_at` são `NOT NULL DEFAULT now()`
+  (0003): não existe timestamp nulo, e conversa sem mensagens aparece pela
+  própria `last_message_at` (= `started_at` ao nascer), com
+  `lastMessage: null`. Por isso o keyset composto
+  `(last_message_at, id) < ($ts::timestamptz, $id::uuid)` é exatamente o
+  `last_message_at.lt.X or (eq.X and id.lt.Y)` do PostgREST.
+- Ordem `last_message_at DESC, id DESC` (lista) e `created_at DESC, id DESC`
+  (histórico, invertido em memória para a ordem cronológica). Busca
+  `limit + 1`; `nextCursor` aponta para o último item **devolvido** (a linha
+  extra só indica que há mais).
+- Cursores e timestamps são strings ISO com microssegundos, como no
+  PostgREST: um cursor gerado pela versão Supabase continua válido.
+- O cursor é só uma posição: usado com outro filtro, devolve os itens desse
+  filtro mais antigos que a posição; de outra empresa, não revela nada (filtro
+  explícito + RLS). Cursor inválido → `InvalidCursorError` antes de usar
+  conexão (lista) ou após confirmar a conversa (histórico, como antes).
+
+### Desempenho (medido com `EXPLAIN ANALYZE`, dados fictícios)
+
+Banco de testes, como `antero_app` com contexto (RLS ativa): 2 organizações
+× 20 mil conversas, 405 mil mensagens, uma conversa com 5 mil mensagens.
+
+| Consulta | Tempo |
+| --- | --- |
+| lista, 1ª página — JOINs/LATERAL no nível do `LIMIT` (1ª versão) | 1 774 ms |
+| lista, 1ª página — página escolhida antes dos JOINs (atual) | 118 ms |
+| lista, página profunda / filtro `open` com cursor (atual) | 61 ms |
+| lista (atual) + índice `(organization_id, last_message_at DESC, id DESC)` | 3–4 ms |
+| detalhe | 0,3 ms |
+| histórico, 1ª página (índice `messages_conversation_created_idx` de trás para frente) | 0,7 ms |
+| histórico, 2 500 mensagens adiante (keyset como condição do índice) | 14,5 ms |
+
+- Uma única consulta de dados por página da Inbox (sem N+1): o LATERAL roda
+  só para as `limit + 1` conversas da página.
+- O custo restante da lista é a política de RLS: `is_org_member()` é
+  chamada para cada conversa da organização antes do top-N. O índice acima
+  eliminaria isso (3–4 ms), mas **não foi criado**: exige migration e a
+  escala atual não precisa. Reavaliar antes de organizações com milhares de
+  conversas (junto com uma política que avalie o vínculo uma vez por
+  consulta).
+
+### Ativação prevista (Entrega 5)
+
+1. Better Auth valida a sessão → `userId`; `organizations/sql-queries.ts#
+   getActiveContext({ userId })` → organização ativa e papel (substitui
+   `lib/auth/dal.ts#getActiveContext`, mantendo `cache` e `redirect`).
+2. Trocar os imports `modules/*/queries` → `modules/*/sql-queries` nos
+   loaders/páginas, passando `{ userId, organizationId }` do DAL.
+3. Remover a regra de lint de `sql-queries` e, depois, os `queries.ts` do
+   Supabase.
+4. Rodar `pnpm db:test:integration` e um roteiro manual da Inbox (lista,
+   filtros, paginação, conversa, histórico) antes de remover o Supabase.

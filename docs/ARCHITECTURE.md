@@ -37,10 +37,14 @@ src/
     layout/              # Sidebar, Header, UserMenu, navegação
   modules/               # lógica por domínio de negócio
     auth/                # schemas + server actions
+    conversations/       # DAL da Inbox (cursor, paginação, mapeadores)
     organizations/  users/  whatsapp/   # queries por domínio
+                         # queries.ts = Supabase (em uso); sql-queries.ts = PostgreSQL
+                         # próprio (Entrega 4, ainda desligado das rotas)
   lib/
     supabase/            # clients browser e server
-    db/                  # PostgreSQL próprio: pool antero_app + withUserTransaction (Entrega 3, ainda sem uso)
+    db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction e
+                         # withOrganizationTransaction (Entregas 3–4, ainda sem uso nas rotas)
     auth/                # dal.ts (verificação de sessão + contexto)
     env/                 # validação de variáveis (client/server)
     types/               # tipos do banco

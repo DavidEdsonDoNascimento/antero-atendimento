@@ -156,7 +156,7 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `050_ingest_inbound_message_test` | as 69 asserções originais da ingestão + isolamento entre orgs |
 | `060_ingest_concurrency_test` | concorrência real com duas conexões (dblink) |
 
-## Testes de integração da camada PostgreSQL (`src/lib/db`)
+## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 
 ```bash
 pnpm db:test:integration   # tests/db/*.test.ts, só contra o banco de testes
@@ -169,7 +169,13 @@ repassa nenhuma credencial de desenvolvimento. Antes de escrever, o harness
 servidor, `fsync = off` e a extensão pgTAP — marcas que o banco de
 desenvolvimento não tem. Fixtures são fictícios e removidos ao final de cada
 arquivo. Os testes rodam com `node --conditions=react-server` (o mesmo modo
-que o Next.js usa para o `server-only`).
+que o Next.js usa para o `server-only`) e com `tests/db/register-aliases.mjs`,
+que resolve o alias `@/` dos módulos da aplicação (hook de `node:module`).
+
+Alguns testes da Entrega 3 contam linhas sem filtro de organização e usam
+`statement_timeout` de 500 ms: não deixe volume extra no banco de testes
+(ex.: dados de `EXPLAIN`); `pnpm db:test:reset` + `pnpm db:test:migrate` o
+recriam do zero.
 
 | Arquivo | Cobre |
 | --- | --- |
@@ -178,6 +184,14 @@ que o Next.js usa para o `server-only`).
 | `security.test.ts` | isolamento entre organizações, desativados, sem organização, sem contexto, tabelas de autenticação |
 | `concurrency.test.ts` | 60 transações simultâneas, transações sobrepostas, falha isolada |
 | `timestamps.test.ts` | microssegundos, paridade com `to_json`, keyset com os cursores atuais |
+| `inbox-list.test.ts` | lista da Inbox: equivalência com o PostgREST, ordem, filtros, paginação, limites, embeds |
+| `inbox-history.test.ts` | detalhe e histórico: equivalência, keyset invertido, empates, µs, not-found |
+| `inbox-isolation.test.ts` | empresas A/B, usuário em duas empresas, desativado, sem organização, sem contexto |
+| `inbox-robustness.test.ts` | pool de 1 conexão: cursores/ids inválidos, erro do PostgreSQL, timeout, sem vazamento |
+| `auxiliary-queries.test.ts` | contexto ativo, membros, conta principal de WhatsApp, admin da plataforma |
+
+`tests/db/inbox-fixtures.ts` monta os dados da Inbox com timestamps explícitos
+(empates, passos de 1 µs) e a referência no formato do PostgREST.
 
 ### Variáveis da aplicação (servidor)
 
@@ -190,7 +204,8 @@ que o Next.js usa para o `server-only`).
 | `APP_DATABASE_STATEMENT_TIMEOUT_MS` | 15000 | limite por comando (servidor) |
 
 `idle_in_transaction_session_timeout` é fixo em 60 s. Ainda não há nada no
-`.env.local` e `pnpm dev` não usa a camada (Entrega 4).
+`.env.local` e `pnpm dev` não usa a camada: as rotas continuam no Supabase até
+a Entrega 5.
 
 ## Schema do Better Auth
 
