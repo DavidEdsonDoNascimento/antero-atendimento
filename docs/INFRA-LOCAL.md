@@ -5,12 +5,13 @@ PostgreSQL 17 de testes (descartável, com pgTAP), Mailpit e um executor de
 migrations SQL. Faz parte da migração para infraestrutura própria (Entregas 1
 e 2).
 
-> **Estado atual:** a aplicação ainda usa o Supabase (veja `docs/SETUP.md`) e
-> `pnpm dev` continua inalterado — nada da aplicação conecta neste banco ainda.
-> O schema completo (identidade do Better Auth + migrations `0000`–`0005`)
-> já é construído do zero aqui e validado por pgTAP (Entrega 2; detalhes em
-> `docs/DATABASE.md`, seção "PostgreSQL próprio"). Nada aqui acessa o
-> Supabase remoto, a VPS ou o Coolify.
+> **Estado atual (Entrega 5B):** a aplicação roda sobre este PostgreSQL
+> (Better Auth + consultas SQL) e o Mailpit. Para rodá-la localmente use
+> `pnpm app:dev` (seção "Aplicação local isolada") — **não** `pnpm dev`: o
+> `.env.local` do repositório ainda aponta para o Supabase remoto. O schema
+> completo (identidade do Better Auth + migrations `0000`–`0005`) é
+> construído do zero e validado por pgTAP (detalhes em `docs/DATABASE.md`).
+> Nada aqui acessa o Supabase remoto, a VPS ou o Coolify.
 
 ## Pré-requisitos
 
@@ -196,6 +197,7 @@ recriam do zero.
 | `identity-password-reset.test.ts` | recuperação com o Mailpit: resposta neutra, link, token expirado/reutilizado, redirecionamentos externos, logs |
 | `identity-rate-limit.test.ts` | limites de login e recuperação por IP, X-Forwarded-For forjado, `auth.api` fora do limite |
 | `identity-access.test.ts` | login real → sessão → organização ativa → consultas SQL por organização |
+| `app-integration.test.ts` | rota `/api/auth` montada pelo Next (rate limit, origem, cadastro), 5xx → 503, perfil próprio, loaders da Inbox com o contexto do DAL, ausência de `auth.api` no app |
 
 `tests/db/inbox-fixtures.ts` monta os dados da Inbox com timestamps explícitos
 (empates, passos de 1 µs) e a referência no formato do PostgREST.
@@ -222,6 +224,61 @@ minúsculas, dígitos, `-` e `*`).
 a Entrega 5B. As variáveis da identidade (`AUTH_DATABASE_URL`,
 `BETTER_AUTH_*`, `AUTH_TRUSTED_PROXIES`, `SMTP_*`, `MAIL_FROM`) estão em
 `docs/AUTH.md`.
+
+## Aplicação local isolada (Entrega 5B)
+
+O Next.js carrega `.env*` do diretório do projeto, e o `.env.local` do
+repositório ainda contém o Supabase remoto. Por isso a aplicação local roda
+numa **cópia** da árvore de trabalho, nunca no repositório:
+
+```bash
+pnpm db:dev-fixtures   # (uma vez) dados fictícios no banco de desenvolvimento
+pnpm app:dev [porta]   # http://127.0.0.1:3460 sobre o banco de desenvolvimento
+pnpm app:e2e           # testes ponta a ponta (servidor real, banco de TESTES, porta 3461)
+pnpm app:build         # build de produção sem rede e sem .env (container node:24)
+```
+
+`scripts/infra.mjs` copia os arquivos versionados e novos não ignorados para
+`~/.cache/antero-atendimentos/app-<dev|test|build>` **sem nenhum `.env*`**
+(aborta se encontrar algum), instala as dependências do lockfile a partir do
+store local (`pnpm install --frozen-lockfile --offline`, só quando o lockfile
+muda) e inicia `next dev` em `127.0.0.1` com apenas estas variáveis:
+`APP_DATABASE_URL` (`antero_app`) e `AUTH_DATABASE_URL` (`antero_auth`) do
+alvo local, `BETTER_AUTH_URL=http://127.0.0.1:<porta>`, `BETTER_AUTH_SECRET`
+aleatório a cada início (as sessões caem ao reiniciar), Mailpit e
+`NEXT_TELEMETRY_DISABLED=1`. Variáveis do shell `NEXT_PUBLIC_*`,
+`SUPABASE_*`, de banco e de autenticação são descartadas. A porta é
+recusada se já estiver em uso. Alterações no repositório só chegam à cópia
+ao reiniciar o comando.
+
+Para o roteiro manual, abra `http://127.0.0.1:3460` (mesma origem de
+`BETTER_AUTH_URL`; `localhost:3460` seria outra origem e o login responderia
+403). E-mails de redefinição: `http://127.0.0.1:55426`.
+
+### Fixtures de desenvolvimento (`pnpm db:dev-fixtures`)
+
+`scripts/dev-fixtures.mjs`: só o banco de desenvolvimento local (confere
+host, porta, nome sem `_test`, papel e ausência de pgTAP); identidades pelo
+fluxo oficial do Better Auth; dados de negócio numa transação como
+`antero_migrator`, com ids determinísticos e `ON CONFLICT DO NOTHING`
+(repetir não duplica nem sobrescreve; um slug ocupado por outra organização
+aborta tudo). Senhas geradas e exibidas **uma vez** (`--rotate-passwords`
+gera novas e encerra as sessões); nada é gravado.
+
+| E-mail (`@ficticio.local`) | Vínculos | Para testar |
+| --- | --- | --- |
+| `dono.a` | A: owner | proprietário |
+| `atendente.a` | A: attendant | atendente, rate limit |
+| `admin.plataforma` | A: admin + `is_platform_admin` | `/admin` |
+| `desativado.a` | A: attendant **desativado** | `/sem-organizacao`; atendente de uma conversa |
+| `recuperacao.a` | A: attendant | redefinição de senha |
+| `dono.b` | B: owner | isolamento entre empresas |
+| `multi` | B (mais antigo) e A | organização ativa determinística (B) |
+| `sem.organizacao` | — | `/sem-organizacao` |
+
+Organização A "Clínica Aurora (fictícia)": 45 conversas (3 páginas), uma com
+230 mensagens (3 páginas de histórico), uma sem mensagens e uma atribuída ao
+atendente desativado. Organização B "Oficina Boreal (fictícia)": 6 conversas.
 
 ## Identidades fictícias locais
 
@@ -276,8 +333,6 @@ configuração do Coolify pertencem a entregas posteriores.
 - No container, `APP_DATABASE_URL` deve apontar para o PostgreSQL pela rede
   interna do Coolify, com o papel `antero_app`; o processo deve chamar
   `closeAppPool()` no encerramento (SIGTERM) para devolver as conexões.
-- `next build` hoje precisa de rede só por causa de `next/font/google`
-  (`src/app/layout.tsx`): um build totalmente offline (container com
-  `--network none`, sem `.env*`) falha ao baixar Geist/Geist Mono e, com as
-  fontes substituídas, conclui. Para builds sem rede no Coolify, migrar para
-  `next/font/local` com os arquivos versionados.
+- `next build` não precisa de rede (Entrega 5B): Geist e Geist Mono vêm de
+  `src/app/fonts/` via `next/font/local` (OFL; ver `src/app/fonts/README.md`).
+  `pnpm app:build` comprova: container `--network none`, sem `.env*`.

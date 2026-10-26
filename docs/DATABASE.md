@@ -3,7 +3,8 @@
 PostgreSQL. UUIDs como chave. RLS obrigatório.
 
 - **Em produção hoje:** Supabase, migrations em `supabase/migrations`
-  (mantidas intactas como referência).
+  (mantidas intactas como referência). Na branch da migração (Entrega 5B) a
+  aplicação já não usa o Supabase: roda sobre o PostgreSQL próprio.
 - **Infraestrutura própria (Entrega 2):** PostgreSQL 17 local, migrations em
   `db/migrations` (dbmate). Mesmo modelo de negócio; identidade do Better Auth
   no lugar do Supabase Auth. Ver a seção "PostgreSQL próprio" ao final.
@@ -300,7 +301,7 @@ commit;
   marca for da transação atual: um `SET` de sessão, um `SET` direto de
   `app.user_id` ou um contexto que sobrou de outra transação resultam em
   `NULL` → acesso negado. Compatível com pool.
-- O valor **não autentica ninguém**: só a camada de servidor (Entrega 5) pode
+- O valor **não autentica ninguém**: só a camada de servidor (DAL) pode
   defini-lo, a partir de uma sessão do Better Auth já validada — nunca de um id
   vindo do cliente.
 
@@ -373,7 +374,7 @@ const rows = await withUserTransaction(sessionUserId, async (tx) => {
   `app.set_user_context($1::uuid)` → callback na mesma conexão → `COMMIT` ou
   `ROLLBACK` (erro propagado) → devolução da conexão (ou descarte, se quebrou).
 - `sessionUserId` deve vir **só** de uma sessão validada no servidor
-  (Entrega 5). Não use em rotas públicas/Server Actions antes disso.
+  (`lib/auth/dal.ts`); nunca de parâmetro, cookie ou corpo da requisição.
 - Não há helper sem usuário nem acesso privilegiado: sem contexto a RLS não
   mostra nada, e a futura ingestão da Meta terá entrada própria (seção
   "Entrada de sistema").
@@ -385,10 +386,10 @@ const rows = await withUserTransaction(sessionUserId, async (tx) => {
 
 ## Consultas SQL da aplicação (Entrega 4)
 
-Camada de leitura **paralela** ao Supabase: as rotas continuam usando
-`modules/*/queries.ts` (PostgREST) e `lib/auth/dal.ts` até a Entrega 5. Uma
-regra de lint (`eslint.config.mjs`) impede importar `sql-queries` em rotas,
-actions ou no DAL antes disso.
+Camada de leitura implementada em paralelo ao Supabase (Entrega 4) e
+**ativada na Entrega 5B**: o DAL e as páginas usam `modules/*/sql-queries.ts`;
+os `queries.ts` (PostgREST) ficaram sem uso, bloqueados por lint, até a
+remoção na Entrega 6.
 
 ### Contexto de organização
 
@@ -420,8 +421,10 @@ explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
 | `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | `queries.ts#getPrimaryWhatsappAccount(organizationId)` |
 
 `ctx` = `{ userId, organizationId }` (`OrganizationContext`). Mesmos nomes,
-mesmos demais parâmetros e mesmos tipos de retorno: a troca na Entrega 5 é o
-caminho do import + o primeiro argumento. O SQL da Inbox fica em
+mesmos demais parâmetros e mesmos tipos de retorno: na Entrega 5B a troca
+foi o caminho do import + o primeiro argumento (`organizationContextOf` do
+DAL). `users/sql-queries.ts#getOwnProfile({ userId })` (5B) lê o perfil do
+próprio usuário para `requirePlatformAdmin`. O SQL da Inbox fica em
 `modules/conversations/sql.ts` (puro, testado sem banco); `cursor.ts`,
 `pagination.ts`, `mappers.ts`, `rows.ts` e `types.ts` não mudaram.
 
@@ -504,14 +507,12 @@ Banco de testes, como `antero_app` com contexto (RLS ativa): 2 organizações
   conversas (junto com uma política que avalie o vínculo uma vez por
   consulta).
 
-### Ativação prevista (Entrega 5)
+### Ativação (Entrega 5B — concluída)
 
-1. Better Auth valida a sessão → `userId`; `organizations/sql-queries.ts#
-   getActiveContext({ userId })` → organização ativa e papel (substitui
-   `lib/auth/dal.ts#getActiveContext`, mantendo `cache` e `redirect`).
-2. Trocar os imports `modules/*/queries` → `modules/*/sql-queries` nos
-   loaders/páginas, passando `{ userId, organizationId }` do DAL.
-3. Remover a regra de lint de `sql-queries` e, depois, os `queries.ts` do
-   Supabase.
-4. Rodar `pnpm db:test:integration` e um roteiro manual da Inbox (lista,
-   filtros, paginação, conversa, histórico) antes de remover o Supabase.
+1. Better Auth valida a sessão → `userId`; `getActiveContext({ userId })` →
+   organização ativa e papel (DAL, com `cache` e `redirect`).
+2. Loaders e páginas usam `modules/*/sql-queries` com `{ userId,
+   organizationId }` do DAL; a regra de lint de `sql-queries` foi substituída
+   por uma que bloqueia o legado Supabase.
+3. Validado: suíte de integração, E2E contra o servidor real e roteiro no
+   navegador (lista, filtros, paginação, conversa, histórico, isolamento).

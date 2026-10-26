@@ -2,16 +2,20 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Ambiente local (PostgreSQL próprio + Better Auth + Mailpit; detalhes em
+`docs/INFRA-LOCAL.md` e `docs/AUTH.md`):
 
 ```bash
 pnpm install
-pnpm dev
+pnpm infra:env && pnpm infra:up && pnpm db:migrate
+pnpm db:dev-fixtures   # dados fictícios (opcional)
+pnpm app:dev           # http://127.0.0.1:3460, numa cópia isolada sem .env*
 ```
 
-Este projeto usa **pnpm** (versão fixada em `packageManager` no `package.json`) como único gerenciador de pacotes. Habilite-o com `corepack enable`, se necessário.
+> Durante a migração, **não** use `pnpm dev` no repositório: o `.env.local`
+> ainda aponta para o Supabase remoto.
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Este projeto usa **pnpm** (versão fixada em `packageManager` no `package.json`) como único gerenciador de pacotes. Habilite-o com `corepack enable`, se necessário.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 

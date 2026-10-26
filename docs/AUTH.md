@@ -1,9 +1,11 @@
-# Autenticação própria — Better Auth 1.7.12 (Entrega 5A)
+# Autenticação própria — Better Auth 1.7.12 (Entregas 5A e 5B)
 
-> **Estado:** implementada e testada, **ainda não ligada à aplicação**. Login,
-> logout, recuperação de senha, `proxy.ts` e o DAL (`src/lib/auth/dal.ts`)
-> continuam no Supabase até a Entrega 5B. Uma regra de lint impede importar
-> `src/lib/identity` em qualquer outro ponto de `src/`.
+> **Estado (Entrega 5B):** é a autenticação da aplicação. Login, logout,
+> recuperação/redefinição de senha, `proxy.ts` e o DAL
+> (`src/lib/auth/dal.ts`) usam o Better Auth sobre o PostgreSQL próprio; as
+> páginas leem dados pelas consultas SQL (`modules/*/sql-queries.ts`). O
+> Supabase não é mais chamado (o SDK e os arquivos legados continuam no
+> repositório, sem uso, até a Entrega 6 — ver "Legado Supabase").
 
 **Divisão de responsabilidades:** o Better Auth responde **quem** é o
 usuário (sessão validada → UUID). **O que** ele acessa continua decidido por
@@ -18,8 +20,10 @@ autenticado não concede organização nenhuma (testado).
 | `pool.ts` | pool `antero_auth` (papel conferido a cada conexão nova), separado do pool `antero_app` |
 | `options.ts` | `buildIdentityAuthOptions`: opções do Better Auth sobre `betterAuthSchemaOptions` (fonte única com a migration `0000`) |
 | `auth.ts` | `getIdentityAuth()` (instância única em `globalThis`), `createIdentityAuth`, `closeIdentity()` |
-| `handler.ts` | `handleIdentityRequest(Request)`: o handler que a 5B monta em `app/api/auth/[...all]` (erro inesperado → 503 neutro) |
-| `session.ts` | `getValidatedSession(headers)` e `signOutSession(headers)` para o DAL da 5B |
+| `constants.ts` | caminho `/api/auth`, nomes do cookie, página de redefinição, limites de senha (sem dependências: proxy e navegador usam) |
+| `handler.ts` | `handleIdentityRequest(Request)`, montado em `app/api/auth/[...all]/route.ts` (exceção ou 5xx → 503 neutro) |
+| `session.ts` | `getValidatedSession(headers)` (usado pelo DAL) e `signOutSession(headers)` |
+| `client.ts` | cliente HTTP oficial do Better Auth para o navegador (`better-auth/client`) |
 | `mailer.ts` | SMTP (`nodemailer`) e o e-mail de redefinição em pt-BR |
 | `provision.ts` | provisionamento LOCAL de identidades fictícias (só scripts/testes) |
 
@@ -69,6 +73,55 @@ Auth já resolvia; o adapter precisa dela para usar `schemaName`),
 - **Logs:** nível `warn`, mensagens redigidas (tokens, `callbackURL`,
   e-mails) e, de erros, só nome/código. Telemetria desligada.
 
+## Como a aplicação usa (Entrega 5B)
+
+| Camada | Arquivo | O que faz |
+| --- | --- | --- |
+| Rota | `src/app/api/auth/[...all]/route.ts` | `GET`/`POST` → `handleIdentityRequest` |
+| Formulários | `src/modules/auth/browser-actions.ts` + páginas `(auth)` | ações de **cliente** (`useActionState`) que validam com os schemas de antes e chamam o handler pelo cliente oficial; mensagens em `modules/auth/messages.ts` |
+| Logout | `UserMenu` e `SignOutForm` | `POST /api/auth/sign-out` e recarga completa em `/login` |
+| Proxy | `src/proxy.ts` + `lib/auth/route-access.ts` | otimista: sem cookie `antero.session_token` com formato de token → `/login`; **sem banco** |
+| DAL | `src/lib/auth/dal.ts` | `getValidatedSession(await headers())` → `getActiveContext({ userId })` (SQL) → `{ userId, organizationId }` para as consultas |
+
+**Por que não há Server Action de login:** `auth.api.signInEmail` no servidor
+não passa pelo rate limit nem pela checagem de origem do handler (testado na
+5A). Os formulários usam o cliente HTTP oficial (`better-auth/client`), com a
+mesma interface, campos, validações e estados de carregamento. Garantias:
+
+- lint (`eslint.config.mjs`): fora de `src/lib/identity`, só `handler`,
+  `session`, `client`, `constants` e `errors` podem ser importados — nada que
+  exponha `auth.api`;
+- teste de integração varre `src/` e falha se aparecer `auth.api`,
+  `getIdentityAuth`, `signInEmail` ou `"use server"` fora de `lib/identity`;
+- o rate limit foi exercitado pela rota montada (integração), pelo servidor
+  Next real (E2E) e pelo formulário no navegador.
+
+**Redirecionamentos:** destinos fixos no código (`/visao-geral` depois do
+login, `/login?aviso=senha-redefinida` depois da troca, `/login` depois do
+logout); nenhum parâmetro de URL escolhe destino. O aviso do login aceita só
+valores conhecidos. O antigo `/auth/confirm` (Supabase, com redirecionamento
+aberto para `//host`) foi removido. `redirectTo` da recuperação é relativo e
+fixo (`/redefinir-senha`); o handler recusa (403) destinos externos.
+
+**Usuário logado em `/login`/`/recuperar-senha`:** a página valida a sessão
+no banco e redireciona. O proxy não faz isso só pelo cookie: um cookie
+revogado criaria um ciclo `/login ↔ /visao-geral`.
+
+**Organização ativa:** regra preservada — vínculo `active` mais antigo
+(`created_at`, desempate por `id`). Desativado, convite ou sem vínculo →
+`/sem-organizacao`. Não há seletor; URL, cookie e corpo não escolhem a
+empresa. Toda consulta usa `withOrganizationTransaction` (vínculo ativo
+conferido na mesma transação + RLS + filtro explícito). `/admin` exige
+`profiles.is_platform_admin` no DAL e de novo no banco
+(`listAllOrganizations`). O status da organização (`inactive`) não bloqueia
+o acesso, como antes.
+
+**Erros:** identidade/banco indisponível → `app/error.tsx` ("Serviço
+temporariamente indisponível", botão que refaz a requisição) ou mensagem do
+formulário; o handler devolve 503 neutro. Sessão expirada/revogada →
+`/login`. Conversa inexistente ou de outra empresa → "Conversa não
+encontrada". Nenhum fallback para o Supabase.
+
 ## Fluxos (validados com o handler real e cookies)
 
 - **Login** `POST /api/auth/sign-in/email` → 200 + cookie; senha errada e
@@ -112,10 +165,18 @@ Better Auth 1.7.12, **memória do processo**, por IP + rota (testado):
   vários saltos não é aceita como IP do cliente e todos caem num balde
   único — 5 erros por minuto bloqueariam o login de todos. Por isso a
   variável é obrigatória em produção (Coolify/Traefik: a rede do proxy).
+- **O Next.js 16 só preenche `X-Forwarded-For` quando ele NÃO vem na
+  requisição** (`base-server`: `??=` com o IP do socket). Com a aplicação
+  exposta diretamente, um cliente pode mandar um `X-Forwarded-For` diferente
+  a cada tentativa e escapar do limite por IP (verificado com `curl` no
+  ambiente local). Em produção, a aplicação deve ser acessível **só** pelo
+  proxy reverso, e ele deve **sobrescrever** o cabeçalho com o IP real
+  (Traefik faz isso para clientes fora de `forwardedHeaders.trustedIPs`).
+  Pendência de configuração do Coolify; ver "Pendências".
 - O limite vale para requisições HTTP (`handler`). **Chamadas
-  `auth.api.*` no servidor não passam por ele** (testado): na 5B o login deve
-  ir pelo handler (`/api/auth/sign-in/email`) ou aplicar o limite antes de
-  `auth.api.signInEmail` numa Server Action.
+  `auth.api.*` no servidor não passam por ele** (testado): por isso a
+  aplicação faz login, logout e redefinição só pelo handler
+  (`/api/auth/*`), a partir do navegador.
 - É por IP, não por conta: não há bloqueio de conta após N falhas (decisão
   pendente; ver "Pendências").
 
@@ -142,31 +203,48 @@ pnpm auth:provision test --email maria@exemplo.local --rotate-password
   organizações, por SQL consciente ou pela futura gestão de membros.
 - `dev` é aceito pelo script, mas **criar identidades no banco de
   desenvolvimento altera dados persistentes**: faça só quando decidido.
+- Para validar a aplicação no navegador há um conjunto pronto, idempotente e
+  fictício: `pnpm db:dev-fixtures` (ver `docs/INFRA-LOCAL.md`).
 
 ## Testes
 
-`pnpm db:test:integration 'identity-*'` (banco descartável + Mailpit; 52
-testes) e `pnpm test:unit` (`config.test.ts`: 8). Ver `docs/INFRA-LOCAL.md`.
+- `pnpm db:test:integration 'identity-*'` (52) e `'app-*'` (5: rota real,
+  5xx → 503, perfil, loaders, varredura de `auth.api`);
+- `pnpm test:unit`: `config.test.ts`, `route-access.test.ts` (proxy),
+  `messages.test.ts` (mensagens e aviso do login);
+- `pnpm app:e2e` (9): servidor Next real isolado sobre o banco de testes —
+  proxy, login/cookies, Inbox por organização, papéis, rate limit, cookie
+  adulterado, sessão revogada, logout, recuperação pelo Mailpit.
 
-## Ativação na Entrega 5B (roteiro)
+Ver `docs/INFRA-LOCAL.md` (aplicação isolada e fixtures de desenvolvimento).
 
-1. Variáveis de identidade no ambiente local de desenvolvimento (não no
-   `.env.local` atual sem decisão) e `pnpm auth:provision dev` para as contas.
-2. `app/api/auth/[...all]/route.ts`: `GET`/`POST` →
-   `handleIdentityRequest(request)`.
-3. Novo DAL (`lib/auth/dal.ts`): `getValidatedSession(await headers())` →
-   `/login` se `null`; `getActiveContext({ userId })`
-   (`modules/organizations/sql-queries`) → `/sem-organizacao` se `null`;
-   `requirePlatformAdmin` via `profile.is_platform_admin`; `cache()` como hoje.
-4. Login/logout/recuperação (`modules/auth/actions.ts` e páginas): postar para
-   o handler (rate limit) ou aplicar o limite antes de `auth.api.*`; página
-   `/redefinir-senha` lê `?token=`/`?error=` e posta `reset-password`.
-5. `proxy.ts`: checagem otimista pelo cookie `antero.session_token` (sem
-   banco); a validação real continua no DAL.
-6. Trocar `modules/*/queries` por `sql-queries` com `{ userId, organizationId }`
-   do DAL; remover as regras de lint de `sql-queries` e `lib/identity`
-   (mantendo `provision.ts` fora do app).
-7. Migrar contas do Supabase (sem senhas: redefinição obrigatória no primeiro
-   acesso) e só então remover `@supabase/*`, `lib/supabase` e `queries.ts`.
-8. Validar: suíte completa, roteiro manual (login, erro, logout, recuperação
-   pelo Mailpit, Inbox por organização), build isolado (após `next/font/local`).
+## Legado Supabase (remoção na Entrega 6)
+
+Sem uso pela aplicação e bloqueados por lint (`@supabase/*`, `@/lib/supabase`,
+`modules/*/queries`): `src/lib/supabase/{client,server}.ts`,
+`src/lib/env/{client,server}.ts` (variáveis `NEXT_PUBLIC_SUPABASE_*`),
+`src/modules/{conversations,organizations,users,whatsapp}/queries.ts`,
+`supabase/` (migrations de referência e seed), `docs/SETUP.md` e as
+dependências `@supabase/ssr` e `@supabase/supabase-js`. O build isolado não
+contém nenhuma referência a Supabase.
+
+## Pendências
+
+1. **Supabase remoto (produção atual):** continua com a falha de
+   autopromoção a `is_platform_admin` (ver `docs/DATABASE.md`). Não alterado.
+2. **Regras de membros herdadas:** `admin` pode criar/alterar/remover `owner`
+   (ver `docs/DATABASE.md`); decidir a política antes de gerir membros.
+3. **Bloqueio por conta:** o limite é por IP; avaliar bloqueio progressivo
+   por conta (ou atraso) antes da exposição pública.
+4. **Várias instâncias:** rate limit em memória; precisa de armazenamento
+   compartilhado antes de escalar horizontalmente.
+5. **`AUTH_TRUSTED_PROXIES` e topologia do Coolify:** configurar com a rede
+   real do Traefik e garantir que a aplicação só receba tráfego pelo proxy,
+   que sobrescreve `X-Forwarded-For` (senão o limite por IP é contornável).
+6. **Contas do Supabase:** senhas não migram; migrar identidades
+   (`auth.users`/perfis/vínculos) e exigir redefinição de senha.
+7. **Campanhas e WhatsApp:** módulo posterior.
+8. **Pedido de redefinição sem cookie aceita outra origem** (o Better Auth só
+   confere origem com cookie ou no login): resposta neutra e limitada por IP,
+   o mesmo que chamar o endpoint diretamente; registrado, sem ação.
+9. **Sessão de 7 dias** (renovada a cada 24 h de uso): confirmar com o produto.
