@@ -348,7 +348,9 @@ const commands = {
   // a camada; antero_migrator e antero_auth para fixtures) e ainda confirma no
   // servidor que é o banco descartável antes de escrever. O alias `@/` é
   // resolvido por tests/db/register-aliases.mjs.
-  integration() {
+  //   pnpm db:test:integration [filtro]   ex.: `identity-*` (padrão: todos)
+  integration([pattern = "*"]) {
+    if (!/^[a-z0-9*-]+$/.test(pattern)) fail("filtro inválido: use letras minúsculas, dígitos, - e *.");
     const cfg = loadConfig();
     const result = spawnSync(
       process.execPath,
@@ -358,12 +360,15 @@ const commands = {
         "--import=./tests/db/register-aliases.mjs",
         "--test",
         "--test-concurrency=1",
-        "tests/db/*.test.ts",
+        `tests/db/${pattern}.test.ts`,
       ],
       {
         cwd: ROOT,
         stdio: "inherit",
         env: nodeChildEnv(cfg, {
+          NODE_ENV: "test",
+          ...localIdentityEnv(cfg, "test"),
+          DB_TEST_MAILPIT_URL: `http://127.0.0.1:${cfg.MAILPIT_UI_PORT}`,
           APP_DATABASE_URL: testUrl(cfg, "antero_app", cfg.TEST_APP_PASSWORD),
           DB_TEST_FIXTURE_URL: testUrl(cfg, "antero_migrator", cfg.TEST_MIGRATOR_PASSWORD),
           DB_TEST_AUTH_URL: testUrl(cfg, "antero_auth", cfg.TEST_AUTH_PASSWORD),

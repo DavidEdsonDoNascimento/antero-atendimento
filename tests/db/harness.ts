@@ -48,12 +48,20 @@ function assertTestTargets() {
   const app = parseTarget("APP_DATABASE_URL");
   const fixture = parseTarget("DB_TEST_FIXTURE_URL");
   const auth = parseTarget("DB_TEST_AUTH_URL");
-  const expectedRoles: Record<string, Target> = {
-    antero_app: app.target,
-    antero_migrator: fixture.target,
-    antero_auth: auth.target,
-  };
-  for (const [role, target] of Object.entries(expectedRoles)) {
+  const identity = parseTarget("AUTH_DATABASE_URL");
+  const expectedRoles: [string, Target][] = [
+    ["antero_app", app.target],
+    ["antero_migrator", fixture.target],
+    ["antero_auth", auth.target],
+    ["antero_auth", identity.target],
+  ];
+  // E-mails dos testes só vão para o Mailpit local.
+  const loopback = (host: string) => host === "127.0.0.1" || host === "localhost";
+  const mailpit = new URL(process.env.DB_TEST_MAILPIT_URL ?? "http://invalido");
+  if (!loopback(process.env.SMTP_HOST ?? "") || !loopback(mailpit.hostname)) {
+    throw new Error("SMTP/Mailpit dos testes não é local. Abortado.");
+  }
+  for (const [role, target] of expectedRoles) {
     const ok =
       target.role === role &&
       (target.host === "127.0.0.1" || target.host === "localhost") &&
