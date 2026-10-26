@@ -1,7 +1,7 @@
 // Lógica pura (sem I/O, sem segredo) — sem `import "server-only"` de
 // propósito, para permanecer testável com `node --test` sem flags
-// especiais. O limite server-side real está em `queries.ts`, que é quem
-// toca o cliente Supabase/cookies e importa este módulo.
+// especiais. O limite server-side real está em `sql-queries.ts`, que é quem
+// usa o PostgreSQL e importa este módulo.
 export type PageLimitConfig = {
   default: number;
   max: number;

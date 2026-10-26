@@ -5,12 +5,12 @@
  * dado sensível: apenas texto de diagnóstico de infraestrutura/consulta.
  *
  * Sem `import "server-only"` de propósito: classes de erro puras, sem I/O,
- * sem segredo — o limite server-side real está em `queries.ts`.
+ * sem segredo — o limite server-side real está em `sql-queries.ts`.
  */
 
 /**
  * Falha ao executar uma consulta na DAL de conversas (erro do
- * Postgrest/Supabase ou do PostgreSQL — sintaxe de consulta, permissão,
+ * PostgreSQL — sintaxe de consulta, permissão,
  * conectividade).
  * Não é usada para "não encontrado": isso é modelado retornando `null`.
  */

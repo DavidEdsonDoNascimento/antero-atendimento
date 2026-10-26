@@ -18,8 +18,8 @@ import type { ConversationStatusFilter } from "./types";
 // `sql-queries.ts` (server-only), dentro de `withOrganizationTransaction`.
 
 /**
- * SQL das leituras de conversas para o PostgreSQL próprio (Entrega 4) —
- * equivalente às consultas PostgREST de `queries.ts`:
+ * SQL das leituras de conversas para o PostgreSQL próprio (Entrega 4),
+ * que substituiu as consultas PostgREST do Supabase (removidas na Entrega 6):
  *
  * - todo valor vai como parâmetro (`$n`); o texto só combina fragmentos
  *   fixos deste arquivo, escolhidos por uma lista controlada de condições;
@@ -194,7 +194,7 @@ export function buildConversationOwnershipQuery(organizationId: string, conversa
  * (`created_at DESC, id DESC`), com keyset `(created_at, id) < (cursor)` —
  * percorre `messages_conversation_created_idx (conversation_id, created_at,
  * id)` de trás para frente. Busca `limit + 1` linhas; quem chama inverte a
- * página para a ordem cronológica, como `queries.ts`.
+ * página para a ordem cronológica, como na versão original.
  */
 export function buildMessageHistoryQuery(
   organizationId: string,

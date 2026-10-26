@@ -36,26 +36,23 @@ const identityInternals = {
     "Use só handler/session/client/constants/errors de `@/lib/identity`: login e senha passam pelo handler HTTP (rate limit e CSRF).",
 };
 
-// Legado Supabase (Entrega 5B): sem uso pela aplicação, mantido até a
-// remoção na Entrega 6. Nada novo pode voltar a depender dele.
-const supabaseLegacy = {
-  group: ["@supabase/*", "@/lib/supabase", "@/lib/supabase/*", "**/lib/supabase/*", "@/modules/*/queries", "**/modules/*/queries", "./queries"],
-  message: "Legado Supabase sem uso (remoção na Entrega 6): use `modules/*/sql-queries` e `@/lib/identity`.",
+// Supabase foi removido (Entrega 6): nenhum pacote, cliente ou PostgREST pode
+// voltar. `pnpm check:supabase` varre o repositório inteiro.
+const noSupabase = {
+  group: ["@supabase/*", "**/lib/supabase", "**/lib/supabase/*", "@/modules/*/queries", "**/modules/*/queries"],
+  message: "Supabase foi removido: use `modules/*/sql-queries` e `@/lib/identity`.",
 };
-
-// Arquivos do legado Supabase, que só importam uns aos outros.
-const supabaseLegacyFiles = ["src/lib/supabase/**", "src/modules/*/queries.ts", "src/lib/env/**"];
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
     files: ["src/**/*.{ts,tsx,js,jsx,mjs}"],
-    ignores: ["src/lib/db/**", "src/lib/identity/**", ...supabaseLegacyFiles],
+    ignores: ["src/lib/db/**", "src/lib/identity/**"],
     rules: {
       "no-restricted-imports": [
         "error",
-        { paths: [restrictedPg], patterns: [dbInternals, identityInternals, supabaseLegacy] },
+        { paths: [restrictedPg], patterns: [dbInternals, identityInternals, noSupabase] },
       ],
     },
   },
@@ -64,7 +61,7 @@ const eslintConfig = defineConfig([
   {
     files: ["src/lib/identity/**/*.{ts,tsx,js,jsx,mjs}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [dbInternals, supabaseLegacy] }],
+      "no-restricted-imports": ["error", { patterns: [dbInternals, noSupabase] }],
     },
   },
   // Override default ignores of eslint-config-next.

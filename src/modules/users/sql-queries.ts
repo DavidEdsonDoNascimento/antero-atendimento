@@ -7,7 +7,7 @@ import type { OrganizationMemberRow } from "./types";
 
 /**
  * Consultas de usuários e membros sobre o PostgreSQL próprio (usadas pelas
- * rotas desde a Entrega 5B; `queries.ts` é o legado Supabase, sem uso). Só
+ * rotas desde a Entrega 5B). Só
  * leitura: gestão de membros não faz parte desta etapa (ver a pendência de
  * regras de administração em docs/DATABASE.md).
  */
@@ -45,7 +45,7 @@ type MemberSqlRow = {
 
 /**
  * Membros da organização com nome e e-mail do perfil, mais antigos
- * primeiro — mesmo contrato de `queries.ts#listOrganizationMembers`.
+ * primeiro.
  * `profile` é `null` quando a RLS de `profiles` o oculta (ex.: membro
  * desativado visto por um colega: `shares_org_with` exige vínculo ativo dos
  * dois lados), exatamente como o embed do PostgREST. Nada de `auth.*`.

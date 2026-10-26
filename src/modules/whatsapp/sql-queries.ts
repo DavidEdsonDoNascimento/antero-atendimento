@@ -5,14 +5,14 @@ import type { WhatsappAccount } from "@/lib/types/database";
 
 /**
  * Consultas de WhatsApp sobre o PostgreSQL próprio (Entrega 4; usadas pelas
- * rotas desde a Entrega 5B — `queries.ts` é o legado Supabase, sem uso, a
- * remover na Entrega 6). Colunas explícitas (nunca `*`): se a tabela ganhar credenciais
+ * rotas desde a Entrega 5B).
+ * Colunas explícitas (nunca `*`): se a tabela ganhar credenciais
  * da Meta, elas não passam a sair daqui sem revisão.
  */
 
 /**
  * Conta de WhatsApp principal da organização (a mais antiga; desempate por
- * `id`) ou `null` — mesmo contrato de `queries.ts#getPrimaryWhatsappAccount`.
+ * `id`) ou `null`.
  */
 export async function getPrimaryWhatsappAccount(context: OrganizationContext): Promise<WhatsappAccount | null> {
   try {
