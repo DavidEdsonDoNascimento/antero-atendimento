@@ -10,19 +10,33 @@ import {
 } from "@/lib/db";
 
 // Extensão .ts explícita nas importações de VALOR (ver nota em cursor.ts).
-import { decodeConversationCursor, encodeConversationCursor } from "./cursor.ts";
+import {
+  decodeConversationCursor,
+  decodeMessageHistoryCursor,
+  encodeConversationCursor,
+  encodeMessageHistoryCursor,
+} from "./cursor.ts";
 import { ConversationQueryError, InvalidCursorError } from "./errors.ts";
-import { mapConversationDetailRow, mapConversationListRow } from "./mappers.ts";
-import { CONVERSATIONS_PAGE_LIMIT, clampLimit } from "./pagination.ts";
+import { mapConversationDetailRow, mapConversationListRow, mapMessageRow } from "./mappers.ts";
+import { CONVERSATIONS_PAGE_LIMIT, MESSAGES_PAGE_LIMIT, clampLimit } from "./pagination.ts";
+import type { MessageHistoryRow } from "./rows";
 import {
   buildConversationDetailQuery,
   buildConversationListQuery,
+  buildConversationOwnershipQuery,
+  buildMessageHistoryQuery,
   toConversationDetailRow,
   toConversationListRow,
   type ConversationDetailSqlRow,
   type ConversationListSqlRow,
 } from "./sql.ts";
-import type { ConversationDetail, ConversationListPage, ListConversationsParams } from "./types";
+import type {
+  ConversationDetail,
+  ConversationListPage,
+  ListConversationMessagesParams,
+  ListConversationsParams,
+  MessageHistoryPage,
+} from "./types";
 
 /**
  * DAL de leitura de conversas sobre o PostgreSQL próprio (Entrega 4) —
@@ -121,4 +135,47 @@ export async function getConversationDetail(
   });
 
   return row ? mapConversationDetailRow(toConversationDetailRow(row)) : null;
+}
+
+/**
+ * Histórico paginado de mensagens — equivalente a
+ * `queries.ts#listConversationMessages`: `null` para conversa inválida,
+ * inexistente ou de outra organização (verificado ANTES de ler mensagens);
+ * `{ items: [], nextCursor: null }` para conversa sem mensagens; itens em
+ * ordem cronológica, páginas seguintes cada vez mais antigas.
+ */
+export async function listConversationMessages(
+  context: OrganizationContext,
+  conversationId: string,
+  params: ListConversationMessagesParams = {},
+): Promise<MessageHistoryPage | null> {
+  if (!isUuid(conversationId)) return null;
+  const limit = clampLimit(params.limit, MESSAGES_PAGE_LIMIT);
+  let cursorUsed = false;
+
+  const rows = await runRead(context, "Falha ao carregar mensagens", () => cursorUsed, async (tx) => {
+    const ownership = buildConversationOwnershipQuery(context.organizationId, conversationId);
+    const { rowCount } = await tx.query(ownership.text, ownership.values);
+    if (!rowCount) return null;
+
+    // Mesma ordem de `queries.ts`: o cursor só é validado para uma conversa
+    // que existe nesta organização.
+    const cursor = params.cursor ? decodeMessageHistoryCursor(params.cursor) : null;
+    cursorUsed = cursor !== null;
+    const query = buildMessageHistoryQuery(context.organizationId, conversationId, { cursor, limit });
+    return (await tx.query<MessageHistoryRow>(query.text, query.values)).rows;
+  });
+  if (rows === null) return null;
+
+  const hasMore = rows.length > limit;
+  const pageRowsDesc = hasMore ? rows.slice(0, limit) : rows;
+  const oldestLoaded = pageRowsDesc.at(-1);
+
+  return {
+    items: pageRowsDesc.map(mapMessageRow).reverse(),
+    nextCursor:
+      hasMore && oldestLoaded
+        ? encodeMessageHistoryCursor({ createdAt: oldestLoaded.created_at, id: oldestLoaded.id })
+        : null,
+  };
 }

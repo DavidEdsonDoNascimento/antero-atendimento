@@ -4,7 +4,7 @@ import type {
   MessageSender,
 } from "@/lib/types/database";
 
-import type { ConversationCursor } from "./cursor";
+import type { ConversationCursor, MessageHistoryCursor } from "./cursor";
 import type {
   ConversationAssignedMemberRow,
   ConversationDetailRow,
@@ -178,6 +178,49 @@ FROM public.conversations c
 ${CONVERSATION_JOINS}
 WHERE c.organization_id = $1::uuid AND c.id = $2::uuid`,
     values: [organizationId, conversationId],
+  };
+}
+
+/** Confirma que a conversa existe NESTA organização (antes de ler mensagens). */
+export function buildConversationOwnershipQuery(organizationId: string, conversationId: string): SqlQuery {
+  return {
+    text: "SELECT c.id FROM public.conversations c WHERE c.organization_id = $1::uuid AND c.id = $2::uuid",
+    values: [organizationId, conversationId],
+  };
+}
+
+/**
+ * Uma página do histórico, da mais nova para a mais antiga
+ * (`created_at DESC, id DESC`), com keyset `(created_at, id) < (cursor)` —
+ * percorre `messages_conversation_created_idx (conversation_id, created_at,
+ * id)` de trás para frente. Busca `limit + 1` linhas; quem chama inverte a
+ * página para a ordem cronológica, como `queries.ts`.
+ */
+export function buildMessageHistoryQuery(
+  organizationId: string,
+  conversationId: string,
+  options: { cursor: MessageHistoryCursor | null; limit: number },
+): SqlQuery {
+  const params = parameters([organizationId, conversationId]);
+  const conditions = ["m.organization_id = $1::uuid", "m.conversation_id = $2::uuid"];
+
+  if (options.cursor) {
+    const at = params.add(options.cursor.createdAt);
+    const id = params.add(options.cursor.id);
+    conditions.push(`(m.created_at, m.id) < (${at}::timestamptz, ${id}::uuid)`);
+  }
+
+  const limit = params.add(options.limit + 1);
+
+  return {
+    text: `
+SELECT m.id, m.direction, m.sender_type, m.message_type, m.content,
+  m.delivery_status, m.sender_user_id, m.created_at
+FROM public.messages m
+WHERE ${conditions.join("\n  AND ")}
+ORDER BY m.created_at DESC, m.id DESC
+LIMIT ${limit}::int`,
+    values: params.values,
   };
 }
 

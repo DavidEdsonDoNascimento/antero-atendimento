@@ -6,6 +6,8 @@ import { mapConversationDetailRow, mapConversationListRow } from "./mappers.ts";
 import {
   buildConversationDetailQuery,
   buildConversationListQuery,
+  buildConversationOwnershipQuery,
+  buildMessageHistoryQuery,
   toConversationDetailRow,
   toConversationListRow,
   type ConversationDetailSqlRow,
@@ -87,12 +89,30 @@ test("relações pelas FKs compostas (organization_id + id)", () => {
   assert.match(text, /LEFT JOIN public\.organization_members am\s+ON am\.organization_id = c\.organization_id AND am\.user_id = c\.assigned_user_id/);
 });
 
-test("detalhe: organização e conversa como parâmetros", () => {
-  for (const query of [buildConversationDetailQuery(orgId, conversationId)]) {
+test("detalhe e posse: organização e conversa como parâmetros", () => {
+  for (const query of [
+    buildConversationDetailQuery(orgId, conversationId),
+    buildConversationOwnershipQuery(orgId, conversationId),
+  ]) {
     assert.deepEqual(query.values, [orgId, conversationId]);
     assert.match(query.text, /c\.organization_id = \$1::uuid AND c\.id = \$2::uuid/);
     assertParameterized(query.text, query.values);
   }
+});
+
+test("histórico: ordem decrescente, keyset (created_at, id) e limit + 1", () => {
+  const first = buildMessageHistoryQuery(orgId, conversationId, { cursor: null, limit: 50 });
+  assert.deepEqual(first.values, [orgId, conversationId, 51]);
+  assert.match(first.text, /ORDER BY m\.created_at DESC, m\.id DESC\s+LIMIT \$3::int$/);
+  assert.doesNotMatch(first.text, /m\.created_at, m\.id\) </);
+
+  const next = buildMessageHistoryQuery(orgId, conversationId, {
+    cursor: { createdAt: cursorAt, id: cursorId },
+    limit: 2,
+  });
+  assert.match(next.text, /\(m\.created_at, m\.id\) < \(\$3::timestamptz, \$4::uuid\)/);
+  assert.deepEqual(next.values, [orgId, conversationId, cursorAt, cursorId, 3]);
+  assertParameterized(next.text, next.values);
 });
 
 const baseSqlRow = {
