@@ -6,19 +6,20 @@ import type pg from "pg";
 // modules/conversations/cursor.ts).
 import { BETTER_AUTH_DB_SCHEMA, betterAuthSchemaOptions } from "../auth/better-auth-options.ts";
 import type { IdentityConfig } from "./config";
+import {
+  IDENTITY_BASE_PATH,
+  IDENTITY_COOKIE_PREFIX,
+  PASSWORD_MAX_LENGTH,
+  PASSWORD_MIN_LENGTH,
+  PASSWORD_RESET_PAGE,
+} from "./constants.ts";
 import type { IdentityMailer } from "./mailer";
 
 // Sem `import "server-only"`: só monta o objeto de opções (sem I/O), para o
 // provisionamento local e os testes o reaproveitarem. A instância usada pela
 // aplicação é criada em `auth.ts` (server-only).
 
-/** Onde a Entrega 5B montará o handler (`app/api/auth/[...all]/route.ts`). */
-export const IDENTITY_BASE_PATH = "/api/auth";
-/** Cookie de sessão: `antero.session_token` (`__Secure-antero.session_token` em https). */
-export const IDENTITY_COOKIE_PREFIX = "antero";
-/** Página (relativa) que recebe `?token=` depois do link de redefinição. */
-export const PASSWORD_RESET_PAGE = "/redefinir-senha";
-export const PASSWORD_MIN_LENGTH = 8;
+export { IDENTITY_BASE_PATH, IDENTITY_COOKIE_PREFIX, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_RESET_PAGE };
 export const PASSWORD_RESET_TOKEN_TTL_SECONDS = 60 * 60;
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 7;
 export const SESSION_REFRESH_AGE_SECONDS = 60 * 60 * 24;
@@ -135,7 +136,7 @@ export function buildIdentityAuthOptions({
       disableSignUp: true,
       requireEmailVerification: false,
       minPasswordLength: PASSWORD_MIN_LENGTH,
-      maxPasswordLength: 128,
+      maxPasswordLength: PASSWORD_MAX_LENGTH,
       resetPasswordTokenExpiresIn: PASSWORD_RESET_TOKEN_TTL_SECONDS,
       revokeSessionsOnPasswordReset: true,
       // Não espera o SMTP: a resposta (neutra) leva o mesmo tempo exista ou

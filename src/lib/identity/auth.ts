@@ -13,10 +13,10 @@ import { createIdentityPool } from "./pool.ts";
 /**
  * Instância do Better Auth sobre o PostgreSQL próprio (`antero_auth`).
  *
- * Entrega 5A: ainda NÃO está ligada a nenhuma rota, página, action ou ao
- * proxy — o login da aplicação continua no Supabase. A Entrega 5B monta
- * `getIdentityAuth().handler` em `app/api/auth/[...all]/route.ts` e troca o
- * DAL (ver docs/AUTH.md).
+ * Usada pela aplicação só por dois caminhos (regra de lint em
+ * eslint.config.mjs): o handler HTTP (`handler.ts`, rota
+ * `app/api/auth/[...all]`) e a leitura da sessão no DAL (`session.ts`).
+ * Ver docs/AUTH.md.
  *
  * Better Auth responde QUEM é o usuário; quais organizações e dados ele
  * acessa continua sendo decidido por `organization_members` + RLS
