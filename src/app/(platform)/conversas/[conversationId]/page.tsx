@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
-import { requireActiveContext } from "@/lib/auth/dal";
-import { getConversationDetail } from "@/modules/conversations/queries";
+import { organizationContextOf, requireActiveContext } from "@/lib/auth/dal";
+import { getConversationDetail } from "@/modules/conversations/sql-queries";
 import { parseConversationStatusFilter, parseCursorParam } from "@/modules/conversations/search-params";
 
 import { ConversationsShell } from "../_components/conversations-shell";
@@ -24,7 +24,7 @@ export default async function ConversaDetalhePage({
   params,
   searchParams,
 }: ConversaDetalhePageProps) {
-  const { organization } = await requireActiveContext();
+  const context = organizationContextOf(await requireActiveContext());
   const { conversationId } = await params;
   const sp = await searchParams;
   const status = parseConversationStatusFilter(sp.status);
@@ -36,15 +36,15 @@ export default async function ConversaDetalhePage({
   // existir e for acessível a esta organização (evita uma consulta inútil
   // para um ID inválido/de outro tenant).
   const [listPage, detail] = await Promise.all([
-    loadConversationList(organization.id, status, listCursor),
-    getConversationDetail(organization.id, conversationId),
+    loadConversationList(context, status, listCursor),
+    getConversationDetail(context, conversationId),
   ]);
 
   const detailState: ConversationDetailState = detail
     ? {
         kind: "found",
         detail,
-        messages: await loadConversationMessages(organization.id, conversationId, messagesCursor),
+        messages: await loadConversationMessages(context, conversationId, messagesCursor),
       }
     : { kind: "not-found" };
 

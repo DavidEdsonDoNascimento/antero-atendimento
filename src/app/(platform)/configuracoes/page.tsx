@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconPhone } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
-import { requireActiveContext } from "@/lib/auth/dal";
+import { organizationContextOf, requireActiveContext } from "@/lib/auth/dal";
 import {
   orgStatusLabel,
   orgStatusTone,
@@ -13,7 +13,7 @@ import {
   whatsappStatusLabel,
   whatsappStatusTone,
 } from "@/lib/labels";
-import { getPrimaryWhatsappAccount } from "@/modules/whatsapp/queries";
+import { getPrimaryWhatsappAccount } from "@/modules/whatsapp/sql-queries";
 
 export const metadata: Metadata = { title: "Configurações" };
 
@@ -29,8 +29,9 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default async function ConfiguracoesPage() {
-  const { organization } = await requireActiveContext();
-  const whatsapp = await getPrimaryWhatsappAccount(organization.id);
+  const active = await requireActiveContext();
+  const { organization } = active;
+  const whatsapp = await getPrimaryWhatsappAccount(organizationContextOf(active));
 
   return (
     <div className="space-y-6">

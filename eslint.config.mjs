@@ -36,25 +36,35 @@ const identityInternals = {
     "Use só handler/session/client/constants/errors de `@/lib/identity`: login e senha passam pelo handler HTTP (rate limit e CSRF).",
 };
 
+// Legado Supabase (Entrega 5B): sem uso pela aplicação, mantido até a
+// remoção na Entrega 6. Nada novo pode voltar a depender dele.
+const supabaseLegacy = {
+  group: ["@supabase/*", "@/lib/supabase", "@/lib/supabase/*", "**/lib/supabase/*", "@/modules/*/queries", "**/modules/*/queries", "./queries"],
+  message: "Legado Supabase sem uso (remoção na Entrega 6): use `modules/*/sql-queries` e `@/lib/identity`.",
+};
+
+// Arquivos do legado Supabase, que só importam uns aos outros.
+const supabaseLegacyFiles = ["src/lib/supabase/**", "src/modules/*/queries.ts", "src/lib/env/**"];
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
     files: ["src/**/*.{ts,tsx,js,jsx,mjs}"],
-    ignores: ["src/lib/db/**", "src/lib/identity/**"],
+    ignores: ["src/lib/db/**", "src/lib/identity/**", ...supabaseLegacyFiles],
     rules: {
       "no-restricted-imports": [
         "error",
-        { paths: [restrictedPg], patterns: [dbInternals, identityInternals] },
+        { paths: [restrictedPg], patterns: [dbInternals, identityInternals, supabaseLegacy] },
       ],
     },
   },
   // A identidade tem pool próprio (`antero_auth`, sem acesso a dados de
-  // negócio) e por isso usa `pg`; as demais restrições continuam valendo.
+  // negócio) e por isso usa `pg`; não usa o legado nem a camada de dados.
   {
     files: ["src/lib/identity/**/*.{ts,tsx,js,jsx,mjs}"],
     rules: {
-      "no-restricted-imports": ["error", { patterns: [dbInternals] }],
+      "no-restricted-imports": ["error", { patterns: [dbInternals, supabaseLegacy] }],
     },
   },
   // Override default ignores of eslint-config-next.

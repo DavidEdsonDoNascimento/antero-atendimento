@@ -4,9 +4,9 @@ import { sqlStateOf, withOrganizationTransaction, type OrganizationContext } fro
 import type { WhatsappAccount } from "@/lib/types/database";
 
 /**
- * Consultas de WhatsApp sobre o PostgreSQL próprio (Entrega 4) — PARALELAS
- * a `queries.ts` (Supabase), que continua sendo a usada pelas rotas até a
- * Entrega 5. Colunas explícitas (nunca `*`): se a tabela ganhar credenciais
+ * Consultas de WhatsApp sobre o PostgreSQL próprio (Entrega 4; usadas pelas
+ * rotas desde a Entrega 5B — `queries.ts` é o legado Supabase, sem uso, a
+ * remover na Entrega 6). Colunas explícitas (nunca `*`): se a tabela ganhar credenciais
  * da Meta, elas não passam a sair daqui sem revisão.
  */
 

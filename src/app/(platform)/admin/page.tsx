@@ -7,7 +7,7 @@ import { IconShield } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePlatformAdmin } from "@/lib/auth/dal";
 import { orgStatusLabel, orgStatusTone } from "@/lib/labels";
-import { listAllOrganizations } from "@/modules/organizations/queries";
+import { listAllOrganizations } from "@/modules/organizations/sql-queries";
 
 export const metadata: Metadata = { title: "Admin da plataforma" };
 
@@ -16,8 +16,9 @@ const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
 });
 
 export default async function AdminPage() {
-  await requirePlatformAdmin();
-  const organizations = await listAllOrganizations();
+  const profile = await requirePlatformAdmin();
+  // O papel é conferido de novo no banco (`public.is_platform_admin`).
+  const organizations = await listAllOrganizations({ userId: profile.id });
 
   return (
     <div className="space-y-6">

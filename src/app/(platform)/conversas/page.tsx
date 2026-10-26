@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
-import { requireActiveContext } from "@/lib/auth/dal";
+import { organizationContextOf, requireActiveContext } from "@/lib/auth/dal";
 import { parseConversationStatusFilter, parseCursorParam } from "@/modules/conversations/search-params";
 
 import { ConversationsShell } from "./_components/conversations-shell";
@@ -17,12 +17,12 @@ type ConversasPageProps = {
 };
 
 export default async function ConversasPage({ searchParams }: ConversasPageProps) {
-  const { organization } = await requireActiveContext();
+  const context = organizationContextOf(await requireActiveContext());
   const sp = await searchParams;
   const status = parseConversationStatusFilter(sp.status);
   const cursor = parseCursorParam(sp.cursor);
 
-  const listPage = await loadConversationList(organization.id, status, cursor);
+  const listPage = await loadConversationList(context, status, cursor);
 
   return (
     <div className="flex flex-col gap-4">

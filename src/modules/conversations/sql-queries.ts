@@ -39,10 +39,10 @@ import type {
 } from "./types";
 
 /**
- * DAL de leitura de conversas sobre o PostgreSQL próprio (Entrega 4) —
- * PARALELA a `queries.ts` (Supabase/PostgREST), que continua sendo a usada
- * pelas rotas até a Entrega 5. Mesmos nomes, mesmos parâmetros depois do
- * primeiro e mesmos tipos de retorno; muda só o primeiro argumento:
+ * DAL de leitura de conversas sobre o PostgreSQL próprio (Entrega 4; usada
+ * pela Inbox desde a Entrega 5B — `queries.ts` é o legado Supabase/PostgREST,
+ * sem uso). Mesmos nomes, mesmos parâmetros depois do primeiro e mesmos
+ * tipos de retorno que o legado; muda só o primeiro argumento:
  *
  *   queries.ts      listConversations(organizationId, params)
  *   sql-queries.ts  listConversations({ userId, organizationId }, params)
@@ -57,9 +57,6 @@ import type {
  * inválido e `ConversationQueryError` para falha do banco (com o
  * `DatabaseError` original em `cause`); além deles, `AccessDeniedError` e
  * `InvalidUserContextError` de `@/lib/db` para contexto inválido.
- *
- * Não importe este módulo em rotas/actions antes da Entrega 5 (regra de
- * lint em eslint.config.mjs).
  */
 
 const uuidSchema = z.uuid();
