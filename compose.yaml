@@ -1,0 +1,143 @@
+# Antero Atendimentos — infraestrutura LOCAL de desenvolvimento e testes.
+#
+# Projeto Compose exclusivo (`antero-atendimentos`), rede e volumes próprios,
+# portas publicadas só em 127.0.0.1. Não conversa com os containers de outros
+# projetos (antero-pedidos, antero-cartas, ...) nem com o Supabase.
+#
+# Sempre use os scripts `pnpm infra:*` / `pnpm db:*` (eles passam
+# `--env-file .env.infra`; gere esse arquivo com `pnpm infra:env`).
+#
+#   padrão   postgres-dev, mailpit        → pnpm infra:up
+#   test     postgres-test (tmpfs)        → pnpm db:test:up
+#   tools    migrate-dev / migrate-test   → pnpm db:migrate / db:test:migrate
+
+name: antero-atendimentos
+
+x-postgres-image: &postgres-image
+  image: antero-atendimentos/postgres:17-pgtap
+  build:
+    context: ./docker/postgres
+
+x-dbmate: &dbmate
+  image: amacneil/dbmate:2.36.0
+  entrypoint: ["dbmate"]
+  environment: &dbmate-env
+    DBMATE_MIGRATIONS_DIR: /db/migrations
+    DBMATE_NO_DUMP_SCHEMA: "true"
+  volumes:
+    - ./db/migrations:/db/migrations:ro
+  networks: [antero]
+
+services:
+  postgres-dev:
+    <<: *postgres-image
+    container_name: antero-atendimentos-db
+    restart: unless-stopped
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC"]
+    environment:
+      POSTGRES_USER: antero_admin
+      POSTGRES_PASSWORD: ${DEV_ADMIN_PASSWORD:?DEV_ADMIN_PASSWORD ausente — rode pnpm infra:env}
+      POSTGRES_DB: ${DEV_DB_NAME:?DEV_DB_NAME ausente}
+      ANTERO_MIGRATOR_PASSWORD: ${DEV_MIGRATOR_PASSWORD:?DEV_MIGRATOR_PASSWORD ausente}
+      ANTERO_APP_PASSWORD: ${DEV_APP_PASSWORD:?DEV_APP_PASSWORD ausente}
+      ANTERO_ENABLE_PGTAP: "false"
+    ports:
+      - "127.0.0.1:${DEV_DB_PORT:?DEV_DB_PORT ausente}:5432"
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antero_admin -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+    networks: [antero]
+
+  # Descartável: dados em tmpfs (somem ao recriar/parar o container) e
+  # durabilidade desligada para acelerar os testes. NUNCA usar fsync=off em
+  # banco com dados que importam.
+  postgres-test:
+    <<: *postgres-image
+    container_name: antero-atendimentos-db-test
+    profiles: [test]
+    command:
+      - postgres
+      - -c
+      - timezone=UTC
+      - -c
+      - log_timezone=UTC
+      - -c
+      - fsync=off
+      - -c
+      - synchronous_commit=off
+      - -c
+      - full_page_writes=off
+    environment:
+      POSTGRES_USER: antero_admin
+      POSTGRES_PASSWORD: ${TEST_ADMIN_PASSWORD:?TEST_ADMIN_PASSWORD ausente — rode pnpm infra:env}
+      POSTGRES_DB: ${TEST_DB_NAME:?TEST_DB_NAME ausente}
+      ANTERO_MIGRATOR_PASSWORD: ${TEST_MIGRATOR_PASSWORD:?TEST_MIGRATOR_PASSWORD ausente}
+      ANTERO_APP_PASSWORD: ${TEST_APP_PASSWORD:?TEST_APP_PASSWORD ausente}
+      ANTERO_ENABLE_PGTAP: "true"
+    ports:
+      - "127.0.0.1:${TEST_DB_PORT:?TEST_DB_PORT ausente}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data:rw,mode=0700
+    volumes:
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+      - ./db/tests:/db/tests:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antero_admin -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks: [antero]
+
+  # Captura e-mails localmente (recuperação de senha etc.). Nenhum e-mail real
+  # é enviado. UI e SMTP publicados só em 127.0.0.1.
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    container_name: antero-atendimentos-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${MAILPIT_SMTP_PORT:?MAILPIT_SMTP_PORT ausente}:1025"
+      - "127.0.0.1:${MAILPIT_UI_PORT:?MAILPIT_UI_PORT ausente}:8025"
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [antero]
+
+  # Executor de migrations (dbmate). Conecta sempre pela rede interna ao
+  # serviço correspondente, com a credencial do antero_migrator — nunca a da
+  # aplicação nem a de administrador. Use via `scripts/infra.mjs migrate`.
+  migrate-dev:
+    <<: *dbmate
+    profiles: [tools]
+    environment:
+      <<: *dbmate-env
+      DATABASE_URL: postgres://antero_migrator:${DEV_MIGRATOR_PASSWORD:?DEV_MIGRATOR_PASSWORD ausente}@postgres-dev:5432/${DEV_DB_NAME:?}?sslmode=disable
+    depends_on:
+      postgres-dev:
+        condition: service_healthy
+
+  migrate-test:
+    <<: *dbmate
+    profiles: [tools]
+    environment:
+      <<: *dbmate-env
+      DATABASE_URL: postgres://antero_migrator:${TEST_MIGRATOR_PASSWORD:?TEST_MIGRATOR_PASSWORD ausente}@postgres-test:5432/${TEST_DB_NAME:?}?sslmode=disable
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+
+networks:
+  antero:
+    name: antero-atendimentos-net
+
+volumes:
+  pgdata-dev:
+    name: antero-atendimentos-pgdata-dev
