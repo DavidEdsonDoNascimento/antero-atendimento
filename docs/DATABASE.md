@@ -1,7 +1,12 @@
 # Banco de dados — Antero Atendimento
 
-PostgreSQL (Supabase). UUIDs como chave. RLS obrigatório. Migrations em
-`supabase/migrations`.
+PostgreSQL. UUIDs como chave. RLS obrigatório.
+
+- **Em produção hoje:** Supabase, migrations em `supabase/migrations`
+  (mantidas intactas como referência).
+- **Infraestrutura própria (Entrega 2):** PostgreSQL 17 local, migrations em
+  `db/migrations` (dbmate). Mesmo modelo de negócio; identidade do Better Auth
+  no lugar do Supabase Auth. Ver a seção "PostgreSQL próprio" ao final.
 
 ## Estratégia por ciclos
 
@@ -207,7 +212,8 @@ Garantias exigidas e atendidas:
 - Um usuário não vê dados de outra organização.
 - Um atendente não altera configurações administrativas (INSERT/UPDATE exigem
   `owner`/`admin`).
-- Usuário não autenticado não acessa nada (sem sessão, `auth.uid()` é nulo).
+- Usuário não autenticado não acessa nada (sem sessão, `auth.uid()` — no
+  banco próprio, `app.current_user_id()` — é nulo).
 - O cliente não consegue “forjar” outro `organization_id`: as políticas checam a
   associação real no banco, não um valor enviado pelo frontend.
 - `contacts`, `conversations` e `messages` **não** concedem leitura a
@@ -231,3 +237,96 @@ canal, não a organização: duas contas de WhatsApp são fluxos de entrega
 independentes, e um id externo de uma conta não deveria bloquear o mesmo id
 em outra conta da mesma organização. O Ciclo 4 adicionará `webhook_events`
 com o mesmo propósito do lado do webhook real da Meta.
+
+## PostgreSQL próprio (Entrega 2)
+
+### Ordem das migrations e dependências
+
+| Migration | Cria | Depende de |
+| --- | --- | --- |
+| `0000_identity` | schema `auth` (tabelas do Better Auth) e schema `app` (contexto do usuário) | papéis `antero_owner`, `antero_app`, `antero_auth` (infra) |
+| `0001_init` | enums, `profiles`, `organizations`, `organization_members`, `whatsapp_accounts`, funções de autorização, gatilhos de perfil | `auth.users`, `app.current_user_id()` |
+| `0002_rls` | privilégios de `antero_app` e as 14 políticas do Ciclo 1 | 0001 |
+| `0003_atendimento` | `contacts`, `conversations`, `messages` (idêntica à original) | 0001 |
+| `0004_atendimento_rls` | as 3 políticas de leitura do Ciclo 2 | 0003 |
+| `0005_ingest_inbound_message` | função de ingestão | 0001, 0003 |
+
+O banco é construído integralmente do zero por `pnpm db:test:migrate`.
+
+### O que mudou em relação ao Supabase
+
+| Supabase | Banco próprio |
+| --- | --- |
+| `auth.users` (Supabase Auth) | `auth.users` do Better Auth 1.7.12 (`users`, `sessions`, `accounts`, `verifications`; ids `uuid`) |
+| `auth.uid()` (claim JWT) | `app.current_user_id()` (contexto da transação) |
+| papel `authenticated` | `antero_app` + contexto de usuário |
+| papel `anon` | `antero_app` **sem** contexto → nada visível |
+| `service_role` | não existe; `antero_auth` só enxerga `auth` |
+| `raw_user_meta_data ->> 'full_name'` | `auth.users.name` |
+
+Tabelas, colunas, tipos, enums, constraints, índices, FKs compostas,
+gatilhos, nomes e expressões das 17 políticas e o corpo de
+`ingest_inbound_message` foram preservados. `gen_random_uuid()` é nativa
+(sem `pgcrypto`).
+
+### Identidade (Better Auth)
+
+- Configuração do schema em `src/lib/auth/better-auth-options.ts` (não
+  ativada em runtime): `generateId: "uuid"`, tabelas no plural, colunas em
+  snake_case, `schemaName: "auth"`. Mudou a configuração → nova migration.
+- `pnpm db:test:auth-schema` compara o banco com o planejador oficial do
+  Better Auth e com uma checagem estrita de tipos (`uuid` em ids e FKs).
+- `profiles.id` → `auth.users.id` (`on delete cascade`). `profiles` nasce pelo
+  gatilho `handle_new_user` (nome vazio → parte local do e-mail) e
+  `profiles.email` acompanha `auth.users.email` (`handle_user_email_updated`).
+  Os dois são `SECURITY DEFINER`: `antero_auth` não precisa de nada em
+  `public`.
+- `antero_app` não tem `USAGE` em `auth`: não lê hashes de senha
+  (`accounts.password`), tokens de sessão, tokens OAuth nem verificações.
+
+### Contexto do usuário
+
+```sql
+begin;
+select app.set_user_context('<id da sessão validada no servidor>');
+-- consultas da aplicação (RLS usa app.current_user_id())
+commit;
+```
+
+- `set_user_context` grava `app.user_id` com escopo de **transação** e uma
+  marca da transação (pid + início). `current_user_id()` só devolve o id se a
+  marca for da transação atual: um `SET` de sessão, um `SET` direto de
+  `app.user_id` ou um contexto que sobrou de outra transação resultam em
+  `NULL` → acesso negado. Compatível com pool.
+- O valor **não autentica ninguém**: só a camada de servidor (Entrega 5) pode
+  defini-lo, a partir de uma sessão do Better Auth já validada — nunca de um id
+  vindo do cliente.
+
+### Correção de segurança em `profiles`
+
+No original, `authenticated` tinha `UPDATE` em todas as colunas de
+`profiles` e `profiles_update_own` só conferia `id = auth.uid()`: qualquer
+usuário podia se tornar `is_platform_admin` ou trocar o próprio e-mail
+desnormalizado. Agora `antero_app` só tem `UPDATE (full_name)`;
+`is_platform_admin` muda apenas administrativamente e `email` vem de
+`auth.users`. A aplicação atual não escreve em `profiles`, então nada muda
+para ela. **O banco do Supabase continua com o comportamento antigo** até a
+migração.
+
+### Entrada de sistema (webhook/worker) — desenho futuro
+
+`ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo
+(é o que o simulador de desenvolvimento usa). A ingestão real da Meta **não**
+deve afrouxá-la (aceitar contexto nulo, "usuário de sistema" global ou
+`organization_id` vindo do chamador). Desenho previsto:
+
+1. papel dedicado (ex.: `antero_ingest`, `LOGIN`, sem `BYPASSRLS`, sem
+   privilégio de leitura nas tabelas) usado só pelo processo do webhook;
+2. função separada `SECURITY DEFINER` executável apenas por esse papel, que
+   recebe o identificador externo da conta (assinatura da Meta já validada
+   pelo webhook) e deriva `organization_id` **somente** de um
+   `whatsapp_account` `cloud_api` conectado;
+3. a gravação (contato, conversa, mensagem, idempotência, reabertura) é
+   extraída para uma função interna comum, sem `EXECUTE` para nenhum papel de
+   login, chamada pelas duas portas de entrada;
+4. `webhook_events` (Ciclo 4) registra a entrega bruta antes da ingestão.
