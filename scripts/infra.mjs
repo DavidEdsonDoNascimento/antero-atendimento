@@ -187,19 +187,19 @@ function localIdentityEnv(cfg, target, baseURL = "http://localhost:3000") {
 }
 
 // ---------------------------------------------------------------------------
-// Aplicação local isolada (Entrega 5B)
+// Aplicação isolada para TESTES (E2E e build)
 //
-// O `.env.local` do repositório ainda aponta para o Supabase remoto, e o
-// Next.js carrega `.env*` do diretório do projeto. Por isso a aplicação local
-// NUNCA roda no repositório: roda numa CÓPIA da árvore de trabalho em
-// ~/.cache/antero-atendimentos/app-<alvo>, sem nenhum arquivo `.env*`, com
-// dependências instaladas do store local do pnpm (`--offline`) e só as
-// variáveis montadas aqui: PostgreSQL local (antero_app/antero_auth), origem
-// http://127.0.0.1:<porta>, segredo aleatório por execução e Mailpit.
-// Variáveis do shell com cara de Supabase/Next públicas são descartadas.
+// O desenvolvimento usa `pnpm dev` no repositório (com `.env.local`, que aponta
+// para o banco de DESENVOLVIMENTO). Os testes ponta a ponta precisam do banco
+// de TESTES e o build precisa rodar sem nenhuma variável, então ambos rodam
+// numa CÓPIA da árvore de trabalho em ~/.cache/antero-atendimentos/app-<alvo>,
+// sem nenhum arquivo `.env*`, com dependências instaladas do store local do
+// pnpm (`--offline`) e só as variáveis montadas aqui: PostgreSQL do alvo
+// (antero_app/antero_auth), origem http://127.0.0.1:<porta>, segredo aleatório
+// por execução e Mailpit. Variáveis do shell de Next públicas são descartadas.
 // ---------------------------------------------------------------------------
 
-const APP_PORTS = { dev: 3460, test: 3461 };
+const APP_PORTS = { test: 3461 };
 const APP_CACHE = join(process.env.XDG_CACHE_HOME || join(homedir(), ".cache"), "antero-atendimentos");
 const ENV_FILE_PATTERN = /(^|\/)\.env/;
 
@@ -262,13 +262,13 @@ function syncAppCopy(cfg, target) {
 
 /**
  * Ambiente de um processo da aplicação isolada: o do shell SEM nada que
- * redirecione conexões (ver nodeChildEnv), sem variáveis de Supabase/Next e
+ * redirecione conexões (ver nodeChildEnv), sem variáveis NEXT_* e
  * sem NODE_ENV/NODE_OPTIONS herdados; depois, só `extra`.
  */
 function appChildEnv(cfg, extra) {
   const env = nodeChildEnv(cfg, {});
   for (const key of Object.keys(env)) {
-    if (/^(NEXT_PUBLIC_|SUPABASE_|NEXT_|NODE_OPTIONS$|NODE_ENV$)/.test(key)) delete env[key];
+    if (/^(NEXT_|NODE_OPTIONS$|NODE_ENV$)/.test(key)) delete env[key];
   }
   return { ...env, ...extra, NEXT_TELEMETRY_DISABLED: "1" };
 }
@@ -364,6 +364,42 @@ const commands = {
     writeFileSync(ENV_FILE, content, { mode: 0o600 });
     chmodSync(ENV_FILE, 0o600);
     console.log("[infra] .env.infra criado (senhas aleatórias, permissão 600, ignorado pelo Git).");
+  },
+
+  // Gera o `.env.local` do desenvolvimento (`pnpm dev` no repositório) a partir
+  // de .env.infra: PostgreSQL local de desenvolvimento (antero_app e
+  // antero_auth), Better Auth em http://127.0.0.1:3000, segredo aleatório e
+  // Mailpit. Não cria papéis nem troca senhas do banco. Se o arquivo já
+  // existe, recusa; com --force copia o antigo para ~/backups (fora do
+  // repositório, permissão 600) e o substitui.
+  "env-local"(args) {
+    const force = args.includes("--force");
+    const cfg = loadConfig();
+    const target = join(ROOT, ".env.local");
+    if (existsSync(target)) {
+      if (!force) {
+        fail(".env.local já existe. Use `pnpm env:local --force` para substituí-lo (o antigo vai para ~/backups).");
+      }
+      const dir = join(homedir(), "backups", "antero-atendimentos");
+      mkdirSync(dir, { recursive: true, mode: 0o700 });
+      const copy = join(dir, `env.local.${new Date().toISOString().replace(/\D/g, "").slice(0, 14)}.bak`);
+      cpSync(target, copy);
+      chmodSync(copy, 0o600);
+      console.log(`[infra] .env.local anterior copiado para ${copy.replace(homedir(), "~")} (600).`);
+    }
+    const env = {
+      APP_DATABASE_URL: targetUrl(cfg, "dev", "antero_app"),
+      ...localIdentityEnv(cfg, "dev", "http://127.0.0.1:3000"),
+    };
+    const lines = [
+      "# Gerado por `pnpm env:local` — desenvolvimento local (PostgreSQL, Better Auth e Mailpit).",
+      "# Ignorado pelo Git. Só serviços locais; nenhum serviço remoto.",
+      ...Object.entries(env).map(([key, value]) => `${key}=${value}`),
+      "",
+    ];
+    writeFileSync(target, lines.join("\n"), { mode: 0o600 });
+    chmodSync(target, 0o600);
+    console.log(`[infra] .env.local criado (${Object.keys(env).length} variáveis, permissão 600).`);
   },
 
   up() {
@@ -534,7 +570,7 @@ const commands = {
         stdio: "inherit",
         env: nodeChildEnv(cfg, {
           NODE_ENV: "development",
-          ...localIdentityEnv(cfg, "dev", `http://127.0.0.1:${APP_PORTS.dev}`),
+          ...localIdentityEnv(cfg, "dev", "http://127.0.0.1:3000"),
           DEV_FIXTURE_URL: targetUrl(cfg, "dev", "antero_migrator"),
           DEV_EXPECTED_DATABASE: cfg.DEV_DB_NAME,
           DEV_EXPECTED_PORT: cfg.DEV_DB_PORT,
@@ -543,25 +579,6 @@ const commands = {
     );
     if (result.error) fail(`não foi possível executar as fixtures: ${result.error.message}`);
     if (result.status !== 0) process.exit(result.status ?? 1);
-  },
-
-  // Aplicação Next.js local e isolada (ver "Aplicação local isolada" acima).
-  //   pnpm app:dev [porta]   → banco de desenvolvimento, http://127.0.0.1:3460
-  async app([target, port]) {
-    targetOf(target);
-    const cfg = loadConfig();
-    const resolvedPort = appPort(target, port);
-    const dir = syncAppCopy(cfg, target);
-    console.log(`[infra] aplicação isolada (${target}) em http://127.0.0.1:${resolvedPort} — cópia ${dir}`);
-    const child = spawn(join(dir, "node_modules", ".bin", "next"), ["dev", "--hostname", "127.0.0.1", "--port", String(resolvedPort)], {
-      cwd: dir,
-      stdio: "inherit",
-      env: appServerEnv(cfg, target, resolvedPort),
-    });
-    const stop = () => child.kill("SIGTERM");
-    process.on("SIGINT", stop);
-    process.on("SIGTERM", stop);
-    await new Promise((done) => child.on("exit", done));
   },
 
   // Testes ponta a ponta contra a aplicação isolada REAL (proxy, rota
