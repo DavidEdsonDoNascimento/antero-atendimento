@@ -4,8 +4,9 @@
 > recuperação/redefinição de senha, `proxy.ts` e o DAL
 > (`src/lib/auth/dal.ts`) usam o Better Auth sobre o PostgreSQL próprio; as
 > páginas leem dados pelas consultas SQL (`modules/*/sql-queries.ts`). O
-> Supabase não é mais chamado (o SDK e os arquivos legados continuam no
-> repositório, sem uso, até a Entrega 6 — ver "Legado Supabase").
+> Supabase foi removido do projeto na Entrega 6 (código, dependências,
+> variáveis e o diretório `supabase/`); `pnpm check:supabase` impede o
+> retorno.
 
 **Divisão de responsabilidades:** o Better Auth responde **quem** é o
 usuário (sessão validada → UUID). **O que** ele acessa continua decidido por
@@ -218,20 +219,23 @@ pnpm auth:provision test --email maria@exemplo.local --rotate-password
 
 Ver `docs/INFRA-LOCAL.md` (aplicação isolada e fixtures de desenvolvimento).
 
-## Legado Supabase (remoção na Entrega 6)
+## Supabase removido (Entrega 6)
 
-Sem uso pela aplicação e bloqueados por lint (`@supabase/*`, `@/lib/supabase`,
-`modules/*/queries`): `src/lib/supabase/{client,server}.ts`,
-`src/lib/env/{client,server}.ts` (variáveis `NEXT_PUBLIC_SUPABASE_*`),
-`src/modules/{conversations,organizations,users,whatsapp}/queries.ts`,
-`supabase/` (migrations de referência e seed), `docs/SETUP.md` e as
-dependências `@supabase/ssr` e `@supabase/supabase-js`. O build isolado não
-contém nenhuma referência a Supabase.
+Removidos: os dois pacotes do SDK do Supabase (cliente e SSR), o cliente
+em `src/lib/` e `src/lib/env` (só validava as variáveis públicas do Supabase),
+os `modules/*/queries.ts` (PostgREST) e o diretório `supabase/`. Barreiras:
+a regra de lint (`eslint.config.mjs`) e `pnpm check:supabase`
+(`scripts/check-no-supabase.mjs`, também no `pnpm test:unit`), que falham
+se voltarem pacotes, imports, variáveis, URLs, comandos da CLI, o diretório
+ou variáveis `SUPABASE_*` em algum `.env*` local. Menções históricas
+(relatórios, comentários das migrations portadas) não falham. Os arquivos
+originais estão no Git: `git show 796c6e7:supabase/migrations/…`.
 
 ## Pendências
 
-1. **Supabase remoto (produção atual):** continua com a falha de
-   autopromoção a `is_platform_admin` (ver `docs/DATABASE.md`). Não alterado.
+1. **Supabase remoto (produção atual):** o projeto remoto não foi tocado e
+   continua com a falha de autopromoção a `is_platform_admin` (ver
+   `docs/DATABASE.md`); decidir seu destino (migração de dados, desligamento).
 2. **Regras de membros herdadas:** `admin` pode criar/alterar/remover `owner`
    (ver `docs/DATABASE.md`); decidir a política antes de gerir membros.
 3. **Bloqueio por conta:** o limite é por IP; avaliar bloqueio progressivo

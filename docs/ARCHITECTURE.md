@@ -10,7 +10,6 @@ Monólito modular em Next.js (App Router). Sem microsserviços, sem monorepo.
 - **Tailwind CSS v4** (configuração via `@theme` no CSS)
 - **PostgreSQL 17 próprio** — RLS, acesso por `pg` em `src/lib/db` (papel `antero_app`)
 - **Better Auth 1.7.12** — identidade e sessões no schema `auth` (`src/lib/identity`, papel `antero_auth`)
-- *(legado, sem uso)* Supabase (`@supabase/ssr`) — removido na Entrega 6
 - **Zod v4** — validação de entrada no servidor
 
 ## Convenções do Next.js 16 (importante)
@@ -40,29 +39,27 @@ src/
   modules/               # lógica por domínio de negócio
     auth/                # schemas + server actions
     conversations/       # DAL da Inbox (cursor, paginação, mapeadores)
-    organizations/  users/  whatsapp/   # queries por domínio
-                         # sql-queries.ts = PostgreSQL próprio (em uso);
-                         # queries.ts = legado Supabase (sem uso, Entrega 6)
+    organizations/  users/  whatsapp/   # consultas SQL por domínio (sql-queries.ts)
   lib/
-    supabase/            # clients browser e server
     db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction e
-                         # withOrganizationTransaction (Entregas 3–4, ainda sem uso nas rotas)
+                         # withOrganizationTransaction
     auth/                # dal.ts (sessão Better Auth + organização ativa via SQL),
                          # route-access.ts (regras do proxy)
     identity/            # Better Auth sobre o PostgreSQL próprio (ver docs/AUTH.md)
-    supabase/  env/      # legado Supabase, sem uso (remoção na Entrega 6)
     types/               # tipos do banco
     utils/  labels.ts    # helpers e rótulos em pt-BR
   proxy.ts               # proteção otimista de rotas (só o cookie, sem banco)
-supabase/
-  migrations/            # SQL versionado
-  seed.sql               # organização Antero + canal de desenvolvimento
+db/
+  migrations/            # SQL versionado (dbmate): única fonte oficial de migrations
+  tests/                 # pgTAP (RLS, funções, ingestão)
+scripts/                 # infraestrutura local, fixtures, verificações
+tests/                   # integração (banco de testes) e ponta a ponta
 ```
 
 ### Por que módulos por domínio (e não repository/service/controller)?
 
-Para cada entidade criamos apenas o que é usado hoje: um arquivo de `queries`
-(leitura) e, quando há escrita, `actions` (Server Actions). Não há camadas
+Para cada entidade criamos apenas o que é usado hoje: um arquivo de consultas
+(`sql-queries.ts`, leitura) e, quando há escrita, `actions` (Server Actions). Não há camadas
 genéricas (repository/service/manager) sem uso real. A estrutura acompanha a
 sugestão do escopo, adaptando nomes de rotas para português (`visao-geral`,
 `conversas`, ...) por serem visíveis ao usuário.

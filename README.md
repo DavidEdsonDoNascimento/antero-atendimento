@@ -7,13 +7,13 @@ Ambiente local (PostgreSQL próprio + Better Auth + Mailpit; detalhes em
 
 ```bash
 pnpm install
-pnpm infra:env && pnpm infra:up && pnpm db:migrate
-pnpm db:dev-fixtures   # dados fictícios (opcional)
-pnpm app:dev           # http://127.0.0.1:3460, numa cópia isolada sem .env*
+pnpm infra:env && pnpm env:local     # .env.infra e .env.local (locais, fora do Git)
+pnpm infra:up && pnpm db:migrate     # PostgreSQL + Mailpit e schema
+pnpm db:dev-fixtures                 # dados fictícios (opcional)
+pnpm dev                             # http://127.0.0.1:3000
 ```
 
-> Durante a migração, **não** use `pnpm dev` no repositório: o `.env.local`
-> ainda aponta para o Supabase remoto.
+Guia completo: `docs/SETUP.md`.
 
 Este projeto usa **pnpm** (versão fixada em `packageManager` no `package.json`) como único gerenciador de pacotes. Habilite-o com `corepack enable`, se necessário.
 

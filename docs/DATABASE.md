@@ -2,12 +2,12 @@
 
 PostgreSQL. UUIDs como chave. RLS obrigatório.
 
-- **Em produção hoje:** Supabase, migrations em `supabase/migrations`
-  (mantidas intactas como referência). Na branch da migração (Entrega 5B) a
-  aplicação já não usa o Supabase: roda sobre o PostgreSQL próprio.
-- **Infraestrutura própria (Entrega 2):** PostgreSQL 17 local, migrations em
-  `db/migrations` (dbmate). Mesmo modelo de negócio; identidade do Better Auth
-  no lugar do Supabase Auth. Ver a seção "PostgreSQL próprio" ao final.
+- **Banco:** PostgreSQL 17 próprio; migrations em `db/migrations` (dbmate),
+  a única fonte oficial. Identidade do Better Auth (schema `auth`). Ver a
+  seção "PostgreSQL próprio" ao final.
+- **Histórico:** o modelo nasceu no Supabase (migrations originais, removidas
+  do projeto na Entrega 6). Recuperáveis no Git:
+  `git show 796c6e7:supabase/migrations/0001_init.sql`.
 
 ## Estratégia por ciclos
 
@@ -386,10 +386,9 @@ const rows = await withUserTransaction(sessionUserId, async (tx) => {
 
 ## Consultas SQL da aplicação (Entrega 4)
 
-Camada de leitura implementada em paralelo ao Supabase (Entrega 4) e
-**ativada na Entrega 5B**: o DAL e as páginas usam `modules/*/sql-queries.ts`;
-os `queries.ts` (PostgREST) ficaram sem uso, bloqueados por lint, até a
-remoção na Entrega 6.
+Camada de leitura implementada na Entrega 4 e **ativada na Entrega 5B**: o
+DAL e as páginas usam `modules/*/sql-queries.ts`;
+os `queries.ts` (PostgREST) do Supabase foram removidos na Entrega 6.
 
 ### Contexto de organização
 
@@ -410,25 +409,24 @@ explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
 
 ### Funções disponíveis
 
-| Módulo (`sql-queries.ts`) | Função | Equivale a |
+| Módulo (`sql-queries.ts`) | Função | Uso |
 | --- | --- | --- |
-| `conversations` | `listConversations(ctx, params)` | `queries.ts#listConversations(organizationId, params)` |
-| `conversations` | `getConversationDetail(ctx, id)` | `queries.ts#getConversationDetail` |
-| `conversations` | `listConversationMessages(ctx, id, params)` | `queries.ts#listConversationMessages` |
-| `organizations` | `getActiveContext({ userId })` | `lib/auth/dal.ts#getActiveContext` (sem `cache`/`redirect`) |
-| `organizations` | `listAllOrganizations({ userId })` | `queries.ts#listAllOrganizations` |
-| `users` | `listOrganizationMembers(ctx)` | `queries.ts#listOrganizationMembers(organizationId)` |
-| `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | `queries.ts#getPrimaryWhatsappAccount(organizationId)` |
+| `conversations` | `listConversations(ctx, params)` | lista da Inbox |
+| `conversations` | `getConversationDetail(ctx, id)` | detalhe da conversa |
+| `conversations` | `listConversationMessages(ctx, id, params)` | histórico paginado |
+| `organizations` | `getActiveContext({ userId })` | contexto ativo do DAL (`lib/auth/dal.ts`) |
+| `organizations` | `listAllOrganizations({ userId })` | `/admin` (confere o papel no banco) |
+| `users` | `listOrganizationMembers(ctx)` | Equipe |
+| `users` | `getOwnProfile({ userId })` | perfil do próprio usuário (DAL) |
+| `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | Configurações |
 
-`ctx` = `{ userId, organizationId }` (`OrganizationContext`). Mesmos nomes,
-mesmos demais parâmetros e mesmos tipos de retorno: na Entrega 5B a troca
-foi o caminho do import + o primeiro argumento (`organizationContextOf` do
-DAL). `users/sql-queries.ts#getOwnProfile({ userId })` (5B) lê o perfil do
-próprio usuário para `requirePlatformAdmin`. O SQL da Inbox fica em
+`ctx` = `{ userId, organizationId }` (`OrganizationContext`), entregue pelo
+DAL (`organizationContextOf`). O SQL da Inbox fica em
 `modules/conversations/sql.ts` (puro, testado sem banco); `cursor.ts`,
-`pagination.ts`, `mappers.ts`, `rows.ts` e `types.ts` não mudaram.
+`pagination.ts`, `mappers.ts`, `rows.ts` e `types.ts` são os contratos de
+retorno.
 
-### Equivalência com o PostgREST
+### Equivalência com o contrato original (PostgREST)
 
 - Embeds → JOINs pelas mesmas FKs compostas: contato e canal (JOIN),
   atendente e perfil (LEFT JOIN), última mensagem por `LEFT JOIN LATERAL`

@@ -1,17 +1,16 @@
 # Infraestrutura local — Antero Atendimento
 
-Ambiente local **independente do Supabase**: PostgreSQL 17 de desenvolvimento,
+Ambiente local próprio: PostgreSQL 17 de desenvolvimento,
 PostgreSQL 17 de testes (descartável, com pgTAP), Mailpit e um executor de
 migrations SQL. Faz parte da migração para infraestrutura própria (Entregas 1
 e 2).
 
-> **Estado atual (Entrega 5B):** a aplicação roda sobre este PostgreSQL
-> (Better Auth + consultas SQL) e o Mailpit. Para rodá-la localmente use
-> `pnpm app:dev` (seção "Aplicação local isolada") — **não** `pnpm dev`: o
-> `.env.local` do repositório ainda aponta para o Supabase remoto. O schema
-> completo (identidade do Better Auth + migrations `0000`–`0005`) é
+> **Estado atual (Entrega 6):** a aplicação roda sobre este PostgreSQL
+> (Better Auth + consultas SQL) e o Mailpit, com `pnpm dev` direto no
+> repositório (`.env.local` gerado por `pnpm env:local`; ver `docs/SETUP.md`).
+> O schema completo (identidade do Better Auth + migrations `0000`–`0005`) é
 > construído do zero e validado por pgTAP (detalhes em `docs/DATABASE.md`).
-> Nada aqui acessa o Supabase remoto, a VPS ou o Coolify.
+> Nada aqui acessa serviços remotos, a VPS ou o Coolify.
 
 ## Pré-requisitos
 
@@ -139,8 +138,8 @@ pnpm db:test:migrate            # aplica pendentes no banco de testes
   dbmate imprime `Rolled back:` mesmo quando o `down` falha — confira o código
   de saída e `status`: nesses casos a migration continua aplicada e nada muda.
   Nunca use rollback no banco de desenvolvimento para "limpar" dados.
-- As migrations originais do Supabase continuam intactas em
-  `supabase/migrations/` e **não** são lidas por este executor.
+- `db/migrations/` é a única fonte oficial de migrations (as originais do
+  Supabase foram removidas do projeto; ver `docs/DATABASE.md`).
 
 ## Testes do banco (pgTAP)
 
@@ -219,41 +218,44 @@ minúsculas, dígitos, `-` e `*`).
 | `APP_DATABASE_IDLE_TIMEOUT_MS` | 30000 | fecha conexões ociosas |
 | `APP_DATABASE_STATEMENT_TIMEOUT_MS` | 15000 | limite por comando (servidor) |
 
-`idle_in_transaction_session_timeout` é fixo em 60 s. Ainda não há nada no
-`.env.local` e `pnpm dev` não usa a camada: as rotas continuam no Supabase até
-a Entrega 5B. As variáveis da identidade (`AUTH_DATABASE_URL`,
+`idle_in_transaction_session_timeout` é fixo em 60 s. `pnpm env:local` grava
+`APP_DATABASE_URL` no `.env.local`. As variáveis da identidade (`AUTH_DATABASE_URL`,
 `BETTER_AUTH_*`, `AUTH_TRUSTED_PROXIES`, `SMTP_*`, `MAIL_FROM`) estão em
 `docs/AUTH.md`.
 
-## Aplicação local isolada (Entrega 5B)
-
-O Next.js carrega `.env*` do diretório do projeto, e o `.env.local` do
-repositório ainda contém o Supabase remoto. Por isso a aplicação local roda
-numa **cópia** da árvore de trabalho, nunca no repositório:
+## Aplicação local
 
 ```bash
+pnpm env:local         # (uma vez) .env.local a partir de .env.infra; --force substitui (com backup)
 pnpm db:dev-fixtures   # (uma vez) dados fictícios no banco de desenvolvimento
-pnpm app:dev [porta]   # http://127.0.0.1:3460 sobre o banco de desenvolvimento
+pnpm dev               # http://127.0.0.1:3000, sobre o banco de desenvolvimento
+```
+
+O `.env.local` gerado contém só `APP_DATABASE_URL`, `AUTH_DATABASE_URL`
+(papéis `antero_app` e `antero_auth` do banco de desenvolvimento),
+`BETTER_AUTH_URL=http://127.0.0.1:3000`, `BETTER_AUTH_SECRET` aleatório
+(sessões sobrevivem a reinícios) e o SMTP do Mailpit. `pnpm dev` escuta só em
+`127.0.0.1`; abra **127.0.0.1**, não `localhost` (mesma origem de
+`BETTER_AUTH_URL`; outra origem → login 403). E-mails de redefinição:
+`http://127.0.0.1:55426`. `pnpm check:supabase` falha se algum `.env*` local
+declarar variáveis do Supabase (o Next.js as carregaria).
+
+### Aplicação isolada para testes (`app:e2e`, `app:build`)
+
+```bash
 pnpm app:e2e           # testes ponta a ponta (servidor real, banco de TESTES, porta 3461)
 pnpm app:build         # build de produção sem rede e sem .env (container node:24)
 ```
 
-`scripts/infra.mjs` copia os arquivos versionados e novos não ignorados para
-`~/.cache/antero-atendimentos/app-<dev|test|build>` **sem nenhum `.env*`**
-(aborta se encontrar algum), instala as dependências do lockfile a partir do
-store local (`pnpm install --frozen-lockfile --offline`, só quando o lockfile
-muda) e inicia `next dev` em `127.0.0.1` com apenas estas variáveis:
-`APP_DATABASE_URL` (`antero_app`) e `AUTH_DATABASE_URL` (`antero_auth`) do
-alvo local, `BETTER_AUTH_URL=http://127.0.0.1:<porta>`, `BETTER_AUTH_SECRET`
-aleatório a cada início (as sessões caem ao reiniciar), Mailpit e
-`NEXT_TELEMETRY_DISABLED=1`. Variáveis do shell `NEXT_PUBLIC_*`,
-`SUPABASE_*`, de banco e de autenticação são descartadas. A porta é
-recusada se já estiver em uso. Alterações no repositório só chegam à cópia
-ao reiniciar o comando.
-
-Para o roteiro manual, abra `http://127.0.0.1:3460` (mesma origem de
-`BETTER_AUTH_URL`; `localhost:3460` seria outra origem e o login responderia
-403). E-mails de redefinição: `http://127.0.0.1:55426`.
+Precisam de isolamento do `.env.local` (que aponta para o banco de
+desenvolvimento): `scripts/infra.mjs` copia os arquivos versionados e novos
+não ignorados para `~/.cache/antero-atendimentos/app-<test|build>` **sem
+nenhum `.env*`** (aborta se encontrar algum), instala as dependências do
+lockfile a partir do store local (`pnpm install --frozen-lockfile --offline`,
+só quando o lockfile muda) e roda com apenas as variáveis do alvo (banco de
+testes, `BETTER_AUTH_URL=http://127.0.0.1:<porta>`, segredo aleatório,
+Mailpit). O antigo `pnpm app:dev` (cópia isolada para desenvolvimento) foi
+removido: com o `.env.local` local, `pnpm dev` no repositório é seguro.
 
 ### Fixtures de desenvolvimento (`pnpm db:dev-fixtures`)
 
