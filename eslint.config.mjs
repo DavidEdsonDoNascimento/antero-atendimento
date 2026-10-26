@@ -21,6 +21,13 @@ const eslintConfig = defineConfig([
               group: ["@/lib/db/*", "**/lib/db/*"],
               message: "Importe apenas de `@/lib/db`; os arquivos internos não são API pública.",
             },
+            // Entrega 4: as consultas SQL paralelas ainda não podem ser
+            // ligadas a rotas, actions ou ao DAL. A Entrega 5 remove esta
+            // restrição ao trocar `queries.ts` por `sql-queries.ts`.
+            {
+              group: ["**/sql-queries", "**/sql-queries.ts"],
+              message: "Camada SQL paralela (Entrega 4): só será ativada na Entrega 5, junto com o Better Auth.",
+            },
           ],
         },
       ],

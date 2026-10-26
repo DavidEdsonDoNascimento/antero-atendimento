@@ -10,12 +10,14 @@
 
 /**
  * Falha ao executar uma consulta na DAL de conversas (erro do
- * Postgrest/Supabase — sintaxe de consulta, permissão, conectividade).
+ * Postgrest/Supabase ou do PostgreSQL — sintaxe de consulta, permissão,
+ * conectividade).
  * Não é usada para "não encontrado": isso é modelado retornando `null`.
  */
 export class ConversationQueryError extends Error {
-  constructor(message: string) {
-    super(message);
+  /** `options.cause`: erro original (ex.: `DatabaseError` com SQLSTATE), só para diagnóstico no servidor. */
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
     this.name = "ConversationQueryError";
   }
 }
