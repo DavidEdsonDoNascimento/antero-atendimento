@@ -2,6 +2,11 @@
 
 Guia para colocar o projeto rodando localmente. Tempo estimado: ~15 minutos.
 
+> A aplicação está sendo migrada do Supabase para infraestrutura própria. A
+> infraestrutura local nova (PostgreSQL, Mailpit, migrations) está em
+> [`docs/INFRA-LOCAL.md`](INFRA-LOCAL.md); este guia segue válido para a
+> aplicação atual, que ainda usa o Supabase.
+
 ## Pré-requisitos
 
 - Node.js 20+
