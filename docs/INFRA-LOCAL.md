@@ -103,7 +103,9 @@ Garantias de base:
   com pool). O identificador vem de uma sessão **validada no servidor**
   (Better Auth), nunca diretamente da requisição; as políticas e as funções
   `SECURITY DEFINER` conferem pertencimento e papel na organização.
-- O Better Auth conectará como `antero_auth`, enxergando só o schema `auth`.
+- O Better Auth conecta como `antero_auth` (pool próprio, `src/lib/identity`,
+  Entrega 5A — ainda não usado pelas rotas; ver `docs/AUTH.md`), enxergando só
+  o schema `auth`.
   Perfis em `public.profiles` nascem/sincronizam por gatilho `SECURITY
   DEFINER`, sem conceder nada em `public` ao `antero_auth`.
 - Webhook/worker futuros: entrada de sistema própria, por papel dedicado e
@@ -189,9 +191,21 @@ recriam do zero.
 | `inbox-isolation.test.ts` | empresas A/B, usuário em duas empresas, desativado, sem organização, sem contexto |
 | `inbox-robustness.test.ts` | pool de 1 conexão: cursores/ids inválidos, erro do PostgreSQL, timeout, sem vazamento |
 | `auxiliary-queries.test.ts` | contexto ativo, membros, conta principal de WhatsApp, admin da plataforma |
+| `identity-foundation.test.ts` | Better Auth: schema x opções reais, UUID, pools/papéis separados, perfil automático, cadastro bloqueado, provisionamento |
+| `identity-sessions.test.ts` | login, cookies (ausente, adulterado, outro segredo, expirado), logout, sessões simultâneas, revogação, CSRF, banco indisponível |
+| `identity-password-reset.test.ts` | recuperação com o Mailpit: resposta neutra, link, token expirado/reutilizado, redirecionamentos externos, logs |
+| `identity-rate-limit.test.ts` | limites de login e recuperação por IP, X-Forwarded-For forjado, `auth.api` fora do limite |
+| `identity-access.test.ts` | login real → sessão → organização ativa → consultas SQL por organização |
 
 `tests/db/inbox-fixtures.ts` monta os dados da Inbox com timestamps explícitos
 (empates, passos de 1 µs) e a referência no formato do PostgREST.
+`tests/db/identity-harness.ts` cria instâncias reais do Better Auth
+(`antero_auth` do banco de testes, segredo aleatório por execução) e as
+exercita pelo handler HTTP com cookies; e-mails vão só para o Mailpit local
+(cada teste lê e apaga só as mensagens dos próprios destinatários).
+
+Um subconjunto: `pnpm db:test:integration 'identity-*'` (filtro com letras
+minúsculas, dígitos, `-` e `*`).
 
 ### Variáveis da aplicação (servidor)
 
@@ -205,7 +219,17 @@ recriam do zero.
 
 `idle_in_transaction_session_timeout` é fixo em 60 s. Ainda não há nada no
 `.env.local` e `pnpm dev` não usa a camada: as rotas continuam no Supabase até
-a Entrega 5.
+a Entrega 5B. As variáveis da identidade (`AUTH_DATABASE_URL`,
+`BETTER_AUTH_*`, `AUTH_TRUSTED_PROXIES`, `SMTP_*`, `MAIL_FROM`) estão em
+`docs/AUTH.md`.
+
+## Identidades fictícias locais
+
+`pnpm auth:provision <test|dev> --email … --name … [--rotate-password]` cria
+(ou reaproveita) uma identidade pelo fluxo oficial do Better Auth, sem
+cadastro público, e mostra a senha gerada uma única vez. Só aceita banco e
+origem locais. Em `dev` altera dados persistentes — use só quando decidido.
+Detalhes em `docs/AUTH.md`.
 
 ## Schema do Better Auth
 

@@ -271,9 +271,11 @@ gatilhos, nomes e expressões das 17 políticas e o corpo de
 
 ### Identidade (Better Auth)
 
-- Configuração do schema em `src/lib/auth/better-auth-options.ts` (não
-  ativada em runtime): `generateId: "uuid"`, tabelas no plural, colunas em
-  snake_case, `schemaName: "auth"`. Mudou a configuração → nova migration.
+- Configuração do schema em `src/lib/auth/better-auth-options.ts`:
+  `generateId: "uuid"`, tabelas no plural, colunas em snake_case,
+  `schemaName: "auth"`. Mudou a configuração → nova migration. A instância
+  de runtime (`src/lib/identity`, Entrega 5A) parte dessas opções e não cria
+  tabelas (rate limit em memória, sem plugins) — ver `docs/AUTH.md`.
 - `pnpm db:test:auth-schema` compara o banco com o planejador oficial do
   Better Auth e com uma checagem estrita de tipos (`uuid` em ids e FKs).
 - `profiles.id` → `auth.users.id` (`on delete cascade`). `profiles` nasce pelo

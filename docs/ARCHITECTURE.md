@@ -45,7 +45,9 @@ src/
     supabase/            # clients browser e server
     db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction e
                          # withOrganizationTransaction (Entregas 3–4, ainda sem uso nas rotas)
-    auth/                # dal.ts (verificação de sessão + contexto)
+    auth/                # dal.ts (verificação de sessão + contexto — Supabase, em uso)
+    identity/            # Better Auth sobre o PostgreSQL próprio (Entrega 5A, ainda
+                         # desligado das rotas; ver docs/AUTH.md)
     env/                 # validação de variáveis (client/server)
     types/               # tipos do banco
     utils/  labels.ts    # helpers e rótulos em pt-BR
