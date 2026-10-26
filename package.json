@@ -30,7 +30,8 @@
     "db:test:migrate:status": "node scripts/infra.mjs migrate test status",
     "db:test:migrate:rollback": "node scripts/infra.mjs migrate test rollback",
     "db:test:auth-schema": "node scripts/infra.mjs auth-schema test",
-    "db:test:pgtap": "node scripts/infra.mjs pgtap"
+    "db:test:pgtap": "node scripts/infra.mjs pgtap",
+    "db:test:integration": "node scripts/infra.mjs integration"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.3",

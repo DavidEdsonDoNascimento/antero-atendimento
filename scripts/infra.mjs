@@ -131,6 +131,28 @@ function childEnv(cfg) {
   return { ...env, ...cfg };
 }
 
+// Ambiente de um processo Node filho (testes, verificação de schema): só o
+// ambiente do shell SEM nada que redirecione conexões e SEM as variáveis de
+// .env.infra — cada comando repassa explicitamente apenas o que precisa.
+function nodeChildEnv(cfg, extra) {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    if (
+      /^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|DB_TEST_|AUTH_SCHEMA_)/.test(key) ||
+      key === "DATABASE_URL" ||
+      key in cfg
+    ) {
+      continue;
+    }
+    env[key] = value;
+  }
+  return { ...env, ...extra };
+}
+
+function testUrl(cfg, role, password) {
+  return `postgres://${role}:${password}@127.0.0.1:${cfg.TEST_DB_PORT}/${cfg.TEST_DB_NAME}`;
+}
+
 function compose(cfg, args, { profiles = [], capture = false, input } = {}) {
   assertLocalDocker();
   const base = ["compose", "-p", PROJECT, "--file", COMPOSE_FILE, "--env-file", ENV_FILE];
@@ -271,11 +293,41 @@ const commands = {
     const result = spawnSync(process.execPath, ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", join(ROOT, "scripts", "auth-schema.mjs"), mode], {
       cwd: ROOT,
       stdio: "inherit",
-      env: {
-        ...childEnv(cfg),
+      env: nodeChildEnv(cfg, {
         AUTH_SCHEMA_DATABASE_URL: `postgres://antero_auth:${cfg[`${prefix}_AUTH_PASSWORD`]}@127.0.0.1:${port}/${db}?sslmode=disable`,
-      },
+      }),
     });
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  },
+
+  // Testes de integração da camada PostgreSQL (src/lib/db) — SEMPRE contra o
+  // banco de TESTES. O processo de teste recebe só as URLs desse banco
+  // (antero_app para a camada; antero_migrator e antero_auth para fixtures) e
+  // ainda confirma no servidor que é o banco descartável antes de escrever.
+  integration() {
+    const cfg = loadConfig();
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--conditions=react-server",
+        "--disable-warning=MODULE_TYPELESS_PACKAGE_JSON",
+        "--test",
+        "--test-concurrency=1",
+        "tests/db/*.test.ts",
+      ],
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: nodeChildEnv(cfg, {
+          APP_DATABASE_URL: testUrl(cfg, "antero_app", cfg.TEST_APP_PASSWORD),
+          DB_TEST_FIXTURE_URL: testUrl(cfg, "antero_migrator", cfg.TEST_MIGRATOR_PASSWORD),
+          DB_TEST_AUTH_URL: testUrl(cfg, "antero_auth", cfg.TEST_AUTH_PASSWORD),
+          DB_TEST_EXPECTED_DATABASE: cfg.TEST_DB_NAME,
+          DB_TEST_EXPECTED_PORT: cfg.TEST_DB_PORT,
+        }),
+      },
+    );
+    if (result.error) fail(`não foi possível executar os testes: ${result.error.message}`);
     if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
