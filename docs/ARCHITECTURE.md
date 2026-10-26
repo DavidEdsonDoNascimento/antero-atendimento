@@ -40,6 +40,7 @@ src/
     organizations/  users/  whatsapp/   # queries por domínio
   lib/
     supabase/            # clients browser e server
+    db/                  # PostgreSQL próprio: pool antero_app + withUserTransaction (Entrega 3, ainda sem uso)
     auth/                # dal.ts (verificação de sessão + contexto)
     env/                 # validação de variáveis (client/server)
     types/               # tipos do banco

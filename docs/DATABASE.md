@@ -310,8 +310,14 @@ usuário podia se tornar `is_platform_admin` ou trocar o próprio e-mail
 desnormalizado. Agora `antero_app` só tem `UPDATE (full_name)`;
 `is_platform_admin` muda apenas administrativamente e `email` vem de
 `auth.users`. A aplicação atual não escreve em `profiles`, então nada muda
-para ela. **O banco do Supabase continua com o comportamento antigo** até a
-migração.
+para ela.
+
+**Pendência de segurança no Supabase antigo (produção atual):** a falha
+continua lá — qualquer usuário autenticado pode executar, pela API do
+Supabase, `update profiles set is_platform_admin = true` no próprio registro.
+Não foi alterada (Supabase remoto fora do escopo). Recomenda-se aplicar lá a
+mesma restrição de coluna (`revoke update … ; grant update (full_name) …`) ou
+concluir a migração antes de expor o produto a usuários não confiáveis.
 
 ### Entrada de sistema (webhook/worker) — desenho futuro
 
@@ -330,3 +336,47 @@ deve afrouxá-la (aceitar contexto nulo, "usuário de sistema" global ou
    extraída para uma função interna comum, sem `EXECUTE` para nenhum papel de
    login, chamada pelas duas portas de entrada;
 4. `webhook_events` (Ciclo 4) registra a entrega bruta antes da ingestão.
+
+### Pendência obrigatória: regras herdadas de gerenciamento de membros
+
+Preservadas da migração sem alteração, mas **precisam de decisão de negócio
+antes de implementar o gerenciamento de membros/usuários** (telas ou ações
+de equipe):
+
+- `organization_members_update`: um `admin` ativo pode alterar o `role` de
+  qualquer vínculo da organização — inclusive promover alguém (ou a si
+  mesmo) a `owner` e rebaixar um `owner`;
+- `organization_members_delete`: um `admin` pode remover qualquer vínculo,
+  inclusive o de um `owner`, e uma organização pode ficar sem `owner`;
+- `organization_members_insert`: um `admin` pode criar vínculos com qualquer
+  papel, inclusive `owner`.
+
+Decidir (ex.: só `owner` gerencia `owner`/`admin`; pelo menos um `owner`
+ativo sempre) e implementar com nova migration + testes pgTAP.
+
+## Camada de acesso da aplicação (Entrega 3)
+
+`src/lib/db` (server-only; importe só de `@/lib/db`):
+
+```ts
+import { withUserTransaction } from "@/lib/db";
+
+const rows = await withUserTransaction(sessionUserId, async (tx) => {
+  const { rows } = await tx.query("SELECT … WHERE organization_id = $1", [organizationId]);
+  return rows;
+});
+```
+
+- Conexão do pool `antero_app` (`APP_DATABASE_URL`) → `BEGIN` →
+  `app.set_user_context($1::uuid)` → callback na mesma conexão → `COMMIT` ou
+  `ROLLBACK` (erro propagado) → devolução da conexão (ou descarte, se quebrou).
+- `sessionUserId` deve vir **só** de uma sessão validada no servidor
+  (Entrega 5). Não use em rotas públicas/Server Actions antes disso.
+- Não há helper sem usuário nem acesso privilegiado: sem contexto a RLS não
+  mostra nada, e a futura ingestão da Meta terá entrada própria (seção
+  "Entrada de sistema").
+- `tx.query` recusa controle de transação/sessão, troca de contexto e
+  parâmetros `Date`; sempre um comando por chamada.
+- Timestamps chegam como string ISO com microssegundos, no mesmo formato do
+  PostgREST (`2026-10-26T13:45:12.123456+00:00`); passe-os de volta como
+  string nos parâmetros (`$1::timestamptz`).

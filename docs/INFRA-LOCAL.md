@@ -156,6 +156,42 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `050_ingest_inbound_message_test` | as 69 asserções originais da ingestão + isolamento entre orgs |
 | `060_ingest_concurrency_test` | concorrência real com duas conexões (dblink) |
 
+## Testes de integração da camada PostgreSQL (`src/lib/db`)
+
+```bash
+pnpm db:test:integration   # tests/db/*.test.ts, só contra o banco de testes
+```
+
+O comando monta, a partir de `.env.infra`, as URLs do banco de **testes** para
+`antero_app` (a camada), `antero_migrator` e `antero_auth` (fixtures) e não
+repassa nenhuma credencial de desenvolvimento. Antes de escrever, o harness
+(`tests/db/harness.ts`) confere host loopback, porta e nome (`*_test`) e, no
+servidor, `fsync = off` e a extensão pgTAP — marcas que o banco de
+desenvolvimento não tem. Fixtures são fictícios e removidos ao final de cada
+arquivo. Os testes rodam com `node --conditions=react-server` (o mesmo modo
+que o Next.js usa para o `server-only`).
+
+| Arquivo | Cobre |
+| --- | --- |
+| `connection.test.ts` | papel `antero_app`, ausência de privilégios, sessão (UTC/ISO, timeouts), ciclo de vida do pool |
+| `transactions.test.ts` | pool de 1 conexão: commit, rollback, erros, timeout, queda de conexão, sem vazamento de contexto |
+| `security.test.ts` | isolamento entre organizações, desativados, sem organização, sem contexto, tabelas de autenticação |
+| `concurrency.test.ts` | 60 transações simultâneas, transações sobrepostas, falha isolada |
+| `timestamps.test.ts` | microssegundos, paridade com `to_json`, keyset com os cursores atuais |
+
+### Variáveis da aplicação (servidor)
+
+| Variável | Padrão | Uso |
+| --- | --- | --- |
+| `APP_DATABASE_URL` | — (obrigatória) | `postgres://antero_app:<senha>@host:porta/banco[?sslmode=…]`; outro papel ou outros parâmetros são recusados |
+| `APP_DATABASE_POOL_MAX` | 10 (1–50) | conexões por processo |
+| `APP_DATABASE_CONNECT_TIMEOUT_MS` | 5000 | espera por conexão |
+| `APP_DATABASE_IDLE_TIMEOUT_MS` | 30000 | fecha conexões ociosas |
+| `APP_DATABASE_STATEMENT_TIMEOUT_MS` | 15000 | limite por comando (servidor) |
+
+`idle_in_transaction_session_timeout` é fixo em 60 s. Ainda não há nada no
+`.env.local` e `pnpm dev` não usa a camada (Entrega 4).
+
 ## Schema do Better Auth
 
 `pnpm db:test:auth-schema` / `pnpm db:auth-schema` (script
@@ -197,3 +233,12 @@ O futuro Dockerfile da aplicação deve usar a mesma versão do pnpm
 (`packageManager` no `package.json`; `corepack enable`) e instalar com
 `pnpm install --frozen-lockfile`. O Dockerfile definitivo, o `/api/health` e a
 configuração do Coolify pertencem a entregas posteriores.
+
+- No container, `APP_DATABASE_URL` deve apontar para o PostgreSQL pela rede
+  interna do Coolify, com o papel `antero_app`; o processo deve chamar
+  `closeAppPool()` no encerramento (SIGTERM) para devolver as conexões.
+- `next build` hoje precisa de rede só por causa de `next/font/google`
+  (`src/app/layout.tsx`): um build totalmente offline (container com
+  `--network none`, sem `.env*`) falha ao baixar Geist/Geist Mono e, com as
+  fontes substituídas, conclui. Para builds sem rede no Coolify, migrar para
+  `next/font/local` com os arquivos versionados.
