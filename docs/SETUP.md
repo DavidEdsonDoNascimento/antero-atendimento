@@ -5,13 +5,13 @@ Guia para colocar o projeto rodando localmente. Tempo estimado: ~15 minutos.
 ## Pré-requisitos
 
 - Node.js 20+
-- npm
+- pnpm 11 (versão fixada em `packageManager`; habilite com `corepack enable`)
 - Uma conta no [Supabase](https://supabase.com) (plano gratuito serve)
 
 ## 1. Instalar dependências
 
 ```bash
-npm install
+pnpm install
 ```
 
 ## 2. Criar o projeto Supabase
@@ -61,11 +61,11 @@ No dashboard, abra **SQL Editor** e execute, nesta ordem, o conteúdo de:
 ### Opção B — Supabase CLI
 
 ```bash
-npx supabase login
-npx supabase link --project-ref <ref-do-projeto>
-npx supabase db push          # aplica as migrations
+pnpm dlx supabase login
+pnpm dlx supabase link --project-ref <ref-do-projeto>
+pnpm dlx supabase db push          # aplica as migrations
 # rode o seed:
-npx supabase db execute --file supabase/seed.sql
+pnpm dlx supabase db execute --file supabase/seed.sql
 ```
 
 Ao final, você terá as tabelas `profiles`, `organizations`,
@@ -115,7 +115,7 @@ where id = (select id from auth.users where email = 'voce@antero.com.br');
 ## 6. Rodar a aplicação
 
 ```bash
-npm run dev
+pnpm dev
 ```
 
 Acesse http://localhost:3000, faça login com o usuário criado e você cairá na
@@ -193,8 +193,8 @@ configuração da **seção 7.2**.
 ## Scripts úteis
 
 ```bash
-npm run dev        # ambiente de desenvolvimento
-npm run build      # build de produção (inclui type-check)
-npm run lint       # ESLint
-npm run typecheck  # TypeScript sem emitir
+pnpm dev            # ambiente de desenvolvimento
+pnpm build          # build de produção (inclui type-check)
+pnpm lint           # ESLint
+pnpm typecheck      # TypeScript sem emitir
 ```
