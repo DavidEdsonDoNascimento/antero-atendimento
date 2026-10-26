@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import { parseIdentityConfig } from "./config.ts";
 import { IdentityConfigError } from "./errors.ts";
+import { redactLogMessage } from "./options.ts";
 
 const SECRET = "k9Q2x7Lm4Vt8Rz1Wp6Hs3Nb5Yc0Df2Gj";
 const PASSWORD = "senha-do-banco-nao-pode-vazar";
@@ -104,4 +105,15 @@ test("SMTP: usuário e senha juntos; remetente com endereço", () => {
   rejects({ ...base, SMTP_SECURE: "sim" }, /SMTP_SECURE/);
   const config = parseIdentityConfig({ ...base, SMTP_USER: "usuario", SMTP_PASSWORD: "x", MAIL_FROM: "a@b.c" });
   assert.deepEqual(config.mail.auth, { user: "usuario", pass: "x" });
+});
+
+test("redactLogMessage remove tokens, callbacks e e-mails", () => {
+  const cases: [string, string][] = [
+    ["Invalid callbackURL: https://atacante.exemplo/x", "Invalid callbackURL: [redigido]"],
+    ["GET /api/auth/reset-password/AbC123xyz?callbackURL=%2Fx", "GET /api/auth/reset-password/[redigido]?callbackURL=[redigido]"],
+    ["redirect /redefinir-senha?token=AbC123", "redirect /redefinir-senha?token=[redigido]"],
+    ["Sign-up attempt for existing email: maria@exemplo.com", "Sign-up attempt for existing email: [e-mail]"],
+    ["User not found", "User not found"],
+  ];
+  for (const [input, expected] of cases) assert.equal(redactLogMessage(input), expected);
 });

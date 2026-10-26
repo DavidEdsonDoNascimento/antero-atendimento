@@ -3,18 +3,16 @@ import type { BetterAuthOptions } from "better-auth";
 /**
  * Opções do Better Auth que determinam o SCHEMA do banco (Entrega 2).
  *
- * Este arquivo NÃO instancia o Better Auth e não é importado por nenhuma
- * página, ação ou proxy: a autenticação em runtime continua no Supabase até a
- * Entrega 5. Ele existe para que o schema versionado em
- * `db/migrations/0000_identity.sql` e a configuração que a Entrega 5 usará
- * sejam a MESMA fonte — `pnpm db:test:auth-schema` compara os dois com o
- * planejador de migrations do próprio Better Auth.
+ * Este arquivo NÃO instancia o Better Auth. Ele existe para que o schema
+ * versionado em `db/migrations/0000_identity.sql` e a configuração de runtime
+ * (`src/lib/identity/options.ts`, Entrega 5A) sejam a MESMA fonte —
+ * `pnpm db:test:auth-schema` compara os dois com o planejador de migrations do
+ * próprio Better Auth, e os testes de integração repetem a comparação com as
+ * opções reais de runtime.
  *
- * Na Entrega 5: `betterAuth({ ...betterAuthSchemaOptions, database: {
- * dialect, type: "postgres", schemaName: BETTER_AUTH_DB_SCHEMA }, ... })`,
- * conectando como `antero_auth`. Qualquer opção que mude o schema (plugins,
- * campos adicionais, `rateLimit.storage = "database"`, nomes) exige uma nova
- * migration e deve entrar AQUI, não direto na chamada de `betterAuth()`.
+ * Qualquer opção que mude o schema (plugins, campos adicionais,
+ * `rateLimit.storage = "database"`, nomes) exige uma nova migration e deve
+ * entrar AQUI, não direto em `lib/identity/options.ts`.
  *
  * Decisões:
  * - Tabelas no schema `auth` (separado de `public`): `antero_app` não tem
