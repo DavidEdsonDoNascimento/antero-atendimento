@@ -13,9 +13,7 @@
 //   print  imprime o SQL que o gerador oficial produziria para este banco
 //          (num banco sem o schema `auth`, é o schema completo de referência).
 
-import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
-
+import { PostgresDialect } from "kysely";
 import pg from "pg";
 import { getAuthTables } from "better-auth/db";
 import { getMigrations } from "better-auth/db/migration";
@@ -35,11 +33,6 @@ if (!/@(127\.0\.0\.1|localhost):\d+\//.test(connectionString)) {
   console.error("[auth-schema] recusado: só bancos locais.");
   process.exit(2);
 }
-
-// O Kysely não é dependência direta do projeto; usa exatamente a instância que
-// o better-auth resolve (mesma versão que o adapter usará em runtime).
-const requireFromBetterAuth = createRequire(import.meta.resolve("better-auth"));
-const { PostgresDialect } = await import(pathToFileURL(requireFromBetterAuth.resolve("kysely")).href);
 
 const pool = new pg.Pool({ connectionString, max: 2 });
 const warnings = [];
