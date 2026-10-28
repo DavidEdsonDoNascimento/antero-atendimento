@@ -1,0 +1,42 @@
+# Lista de PERMISSÃO: nada entra no contexto de build, exceto o que está
+# liberado abaixo. Assim, um arquivo novo (.env, dump, chave, backup...) nunca
+# entra na imagem por acidente.
+*
+
+# --- necessário ao build e ao runtime
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!next.config.ts
+!tsconfig.json
+!postcss.config.mjs
+!src
+!docker/app
+# Migrations (SQL versionado, sem credenciais): usadas só pelo alvo `migrate`.
+!db/migrations
+
+# --- mesmo dentro dos diretórios liberados, nunca:
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.crt
+**/*.p12
+**/*.pfx
+**/id_rsa*
+**/*.bak
+**/*.dump
+**/*.sql.gz
+**/*.log
+**/*.tsbuildinfo
+**/node_modules
+**/.next
+**/.git
+**/.DS_Store
+**/*.tmp
+# Testes não fazem parte da imagem (rodam fora do Docker: pnpm test:unit).
+**/*.test.ts
+**/*.test.tsx
+**/*.swp
+**/credentials*
+**/*secret*
