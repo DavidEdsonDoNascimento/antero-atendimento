@@ -173,7 +173,11 @@ Better Auth 1.7.12, **memória do processo**, por IP + rota (testado):
   ambiente local). Em produção, a aplicação deve ser acessível **só** pelo
   proxy reverso, e ele deve **sobrescrever** o cabeçalho com o IP real
   (Traefik faz isso para clientes fora de `forwardedHeaders.trustedIPs`).
-  Pendência de configuração do Coolify; ver "Pendências".
+  Pendência de configuração do Coolify; ver "Pendências". **Entrega 7A:**
+  confirmado com o Traefik 3.6 real em homologação local (pelo proxy: 5 erros
+  e 429 mesmo variando o cabeçalho; direto na aplicação: sem limite) — ver
+  `docs/DEPLOY.md` ("Proxy e X-Forwarded-For"), que também analisa defesas
+  adicionais. A rede real do Coolify segue por testar (Entrega 7B).
 - O limite vale para requisições HTTP (`handler`). **Chamadas
   `auth.api.*` no servidor não passam por ele** (testado): por isso a
   aplicação faz login, logout e redefinição só pelo handler
@@ -239,12 +243,14 @@ originais estão no Git: `git show 796c6e7:supabase/migrations/…`.
 2. **Regras de membros herdadas:** `admin` pode criar/alterar/remover `owner`
    (ver `docs/DATABASE.md`); decidir a política antes de gerir membros.
 3. **Bloqueio por conta:** o limite é por IP; avaliar bloqueio progressivo
-   por conta (ou atraso) antes da exposição pública.
+   por conta (ou atraso) antes da exposição pública. Análise e recomendação em
+   `docs/DEPLOY.md` ("Rate limiting"): decidir antes de abrir a usuários reais.
 4. **Várias instâncias:** rate limit em memória; precisa de armazenamento
    compartilhado antes de escalar horizontalmente.
 5. **`AUTH_TRUSTED_PROXIES` e topologia do Coolify:** configurar com a rede
    real do Traefik e garantir que a aplicação só receba tráfego pelo proxy,
    que sobrescreve `X-Forwarded-For` (senão o limite por IP é contornável).
+   Condições e testes: `docs/DEPLOY.md` (7A); verificação no Coolify real: 7B.
 6. **Contas do Supabase:** senhas não migram; migrar identidades
    (`auth.users`/perfis/vínculos) e exigir redefinição de senha.
 7. **Campanhas e WhatsApp:** módulo posterior.

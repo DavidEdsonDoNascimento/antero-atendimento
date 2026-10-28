@@ -13,7 +13,8 @@ pnpm db:dev-fixtures                 # dados fictícios (opcional)
 pnpm dev                             # http://127.0.0.1:3000
 ```
 
-Guia completo: `docs/SETUP.md`.
+Guia completo: `docs/SETUP.md`. Imagem Docker de produção, migrations,
+health checks e preparação para o Coolify: `docs/DEPLOY.md`.
 
 Este projeto usa **pnpm** (versão fixada em `packageManager` no `package.json`) como único gerenciador de pacotes. Habilite-o com `corepack enable`, se necessário.
 
