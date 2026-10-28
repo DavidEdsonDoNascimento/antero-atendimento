@@ -239,6 +239,67 @@ const commands = {
     console.log("[homolog] homologação removida (contêineres, redes, volume e segredos).");
   },
 
+  // Verificação do CONTEÚDO da imagem de produção (usuário, ambiente, arquivos,
+  // dependências e ausência de segredos). Reprodutível; nunca imprime valores.
+  async "image-check"() {
+    assertLocalDocker();
+    const image = "antero-atendimentos/app:homolog";
+    const problems = [];
+    const check = (label, ok, detail = "") => {
+      console.log(`  ${ok ? "ok   " : "FALHA"} ${label}${ok || !detail ? "" : ` — ${detail}`}`);
+      if (!ok) problems.push(label);
+    };
+    const sh = (args, options = {}) => spawnSync("docker", args, { encoding: "utf8", maxBuffer: 1 << 30, ...options });
+    const info = JSON.parse(sh(["image", "inspect", image]).stdout)[0];
+    const cfg = info.Config;
+    console.log(`[homolog] imagem ${image}: ${(info.Size / 1e6).toFixed(0)} MB de conteúdo comprimido (docker images mostra o tamanho em disco)`);
+    check("executa como usuário não root", cfg.User === "node");
+    check("NODE_ENV=production, PORT=3000, HOSTNAME=0.0.0.0", ["NODE_ENV=production", "PORT=3000", "HOSTNAME=0.0.0.0"].every((e) => cfg.Env.includes(e)));
+    check("CMD em forma exec (Node é o PID 1)", JSON.stringify(cfg.Cmd) === '["node","server.js"]');
+    check("HEALTHCHECK de prontidão definido", JSON.stringify(cfg.Healthcheck?.Test) === '["CMD","node","healthcheck.mjs"]');
+    const secretKey = /(PASSWORD|SECRET|TOKEN|DATABASE_URL|SMTP_|BETTER_AUTH|KEY)/i;
+    check("nenhuma variável sensível no ambiente da imagem", !cfg.Env.some((e) => secretKey.test(e.split("=")[0])));
+    const history = sh(["history", "--no-trunc", "--format", "{{.CreatedBy}}", image]).stdout;
+    check("histórico sem ARG/ENV sensível", !/(PASSWORD|SECRET|TOKEN|DATABASE_URL|BETTER_AUTH)/i.test(history));
+
+    const probe = sh(["run", "--rm", "--entrypoint", "sh", image, "-c", [
+      "id -u",
+      "find / -xdev \\( -name '.env*' -o -name '*.pem' -o -name '*.key' -o -name '*.sql' -o -name '*.test.*' -o -name '*.bak' -o -name '*.dump' \\) -not -path '/usr/*' -not -path '/opt/*' 2>/dev/null | head -5",
+      "echo '--'",
+      "for p in typescript eslint tailwindcss @types/node babel-plugin-react-compiler; do [ -e /app/node_modules/$p ] && echo \"dep:$p\"; done",
+      "command -v pnpm || true",
+      "touch /app/x 2>/dev/null && echo escrita-em-app",
+    ].join("; ")]).stdout.split("\n");
+    const [uid, ...rest] = probe;
+    const split = rest.indexOf("--");
+    check("uid do processo ≠ 0", uid.trim() !== "0");
+    check("sem .env, chaves, dumps, SQL ou testes na imagem", split === 0, rest.slice(0, split).join(", "));
+    const after = rest.slice(split + 1).filter(Boolean);
+    check("sem devDependencies (typescript, eslint, tailwind...) no runtime", !after.some((l) => l.startsWith("dep:")), after.join(","));
+    check("sem pnpm no runtime", !after.some((l) => l.includes("pnpm")));
+    check("/app somente leitura para o usuário da aplicação", !after.includes("escrita-em-app"));
+
+    // Nenhum valor real dos arquivos de ambiente locais pode aparecer no sistema de arquivos da imagem.
+    const secrets = new Set();
+    for (const file of [".env.local", ".env.infra", ENV_FILE]) {
+      const path = file.startsWith("/") ? file : join(ROOT, file);
+      if (!existsSync(path)) continue;
+      for (const value of Object.values(parseEnvFile(path))) if (value.length >= 12) secrets.add(value);
+    }
+    const container = sh(["create", image]).stdout.trim();
+    try {
+      const exported = spawnSync("docker", ["export", container], { maxBuffer: 1 << 30 });
+      const tar = exported.stdout;
+      check("(sanidade) a busca encontra um texto que está na imagem", tar.includes(Buffer.from("/api/health/ready")));
+      const leaked = [...secrets].filter((value) => tar.includes(Buffer.from(value)));
+      check(`nenhum dos ${secrets.size} valores de .env.local/.env.infra/homologação aparece na imagem`, leaked.length === 0, `${leaked.length} valor(es) encontrados`);
+    } finally {
+      sh(["rm", container]);
+    }
+    if (problems.length) fail(`${problems.length} verificação(ões) falharam.`);
+    console.log("[homolog] imagem aprovada.");
+  },
+
   // Suíte E2E existente (tests/e2e) contra a imagem de PRODUÇÃO (app-e2e).
   async e2e() {
     const cfg = loadConfig();

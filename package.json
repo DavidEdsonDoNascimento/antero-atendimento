@@ -47,7 +47,8 @@
     "homolog:down": "node scripts/homolog.mjs down",
     "homolog:reset": "node scripts/homolog.mjs reset",
     "homolog:e2e": "node scripts/homolog.mjs e2e",
-    "homolog:prod": "node scripts/homolog.mjs prod"
+    "homolog:prod": "node scripts/homolog.mjs prod",
+    "homolog:image-check": "node scripts/homolog.mjs image-check"
   },
   "dependencies": {
     "better-auth": "1.7.12",
