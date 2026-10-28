@@ -259,6 +259,12 @@ const commands = {
     run(["up", "-d", "--wait", "db", "mailpit"]);
     run(["run", "--rm", "--no-TTY", "migrate", "up"]);
     run(["up", "-d", "--wait", "app", "traefik", "app-e2e"]);
+    // Os limites de tentativas ficam na memória do processo: reiniciar as duas
+    // instâncias começa cada execução com contadores zerados.
+    for (const container of [CONTAINERS.app, CONTAINERS.appE2e]) {
+      spawnSync("docker", ["restart", "--time", "30", container], { stdio: "ignore" });
+    }
+    await waitHealthy(CONTAINERS.app);
     await waitHealthy(CONTAINERS.appE2e);
     runTests(cfg, [`tests/prod/${which}.test.ts`]);
   },
