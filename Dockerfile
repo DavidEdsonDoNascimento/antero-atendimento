@@ -2,7 +2,7 @@
 #
 # Antero Atendimentos — imagem de PRODUÇÃO (Next.js 16 standalone + pnpm 11).
 #
-#   docker build -t antero-atendimentos/app .                   # aplicação
+#   docker build -t antero-atendimentos/app .                        # aplicação (último estágio = padrão)
 #   docker build --target migrate -t antero-atendimentos/migrate .   # migrations
 #
 # Nenhum segredo entra na imagem: o build não lê variáveis de ambiente (provado
@@ -38,6 +38,20 @@ COPY src ./src
 ENV NODE_ENV=production
 RUN pnpm exec next build
 
+# ---------------------------------------------------------------- migrate
+# Executor de migrations (dbmate) com as migrations DESTE commit. Não é a
+# aplicação: roda sob demanda, como antero_migrator, ANTES de ativar a nova
+# versão (`up` é idempotente e só aplica o que falta). Credencial só em
+# runtime (DATABASE_URL). Nunca executa no start da aplicação.
+FROM amacneil/dbmate:2.36.0 AS migrate
+ENV DBMATE_MIGRATIONS_DIR=/db/migrations \
+    DBMATE_NO_DUMP_SCHEMA=true \
+    DBMATE_WAIT=true \
+    DBMATE_WAIT_TIMEOUT=60s
+COPY db/migrations /db/migrations
+ENTRYPOINT ["dbmate"]
+CMD ["up"]
+
 # ---------------------------------------------------------------- runtime
 FROM ${NODE_IMAGE} AS runtime
 LABEL org.opencontainers.image.title="antero-atendimentos" \
@@ -61,17 +75,3 @@ HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
   CMD ["node", "healthcheck.mjs"]
 # Forma exec: o Node é o PID 1 e recebe SIGTERM/SIGINT diretamente.
 CMD ["node", "server.js"]
-
-# ---------------------------------------------------------------- migrate
-# Executor de migrations (dbmate) com as migrations DESTE commit. Não é a
-# aplicação: roda sob demanda, como antero_migrator, ANTES de ativar a nova
-# versão (`up` é idempotente e só aplica o que falta). Credencial só em
-# runtime (DATABASE_URL). Nunca executa no start da aplicação.
-FROM amacneil/dbmate:2.36.0 AS migrate
-ENV DBMATE_MIGRATIONS_DIR=/db/migrations \
-    DBMATE_NO_DUMP_SCHEMA=true \
-    DBMATE_WAIT=true \
-    DBMATE_WAIT_TIMEOUT=60s
-COPY db/migrations /db/migrations
-ENTRYPOINT ["dbmate"]
-CMD ["up"]
