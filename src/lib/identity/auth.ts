@@ -57,6 +57,17 @@ export function getIdentityAuth(): IdentityAuth {
   return holder[GLOBAL_KEY].auth;
 }
 
+/**
+ * Prontidão da identidade (`/api/health/ready`): a configuração é válida (a
+ * instância é criada se preciso) e o pool `antero_auth` conecta e enxerga o
+ * schema `auth`. `limit 0` não lê nenhuma linha, mas exige a tabela e o
+ * privilégio `SELECT`.
+ */
+export async function pingIdentityDatabase(): Promise<void> {
+  getIdentityAuth();
+  await holder[GLOBAL_KEY]?.pool.query("select 1 from auth.sessions limit 0");
+}
+
 /** Encerra o pool e o SMTP da identidade (shutdown controlado / testes). */
 export async function closeIdentity(): Promise<void> {
   const state = holder[GLOBAL_KEY];
