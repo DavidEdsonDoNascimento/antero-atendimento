@@ -1,0 +1,189 @@
+# Antero Atendimentos — HOMOLOGAÇÃO LOCAL da imagem de produção (Entrega 7A).
+#
+# Projeto Compose próprio (`antero-atendimentos-homolog`), com redes, volume,
+# contêineres e portas exclusivos; nada é compartilhado com o ambiente de
+# desenvolvimento (`compose.yaml`) nem com outros projetos. Tudo é descartável
+# e usa DADOS FICTÍCIOS e segredos gerados na hora. Use SEMPRE
+# `pnpm homolog:*` (scripts/homolog.mjs gera os segredos e o certificado,
+# fora do repositório, e fixa projeto e arquivo).
+#
+# Topologia (espelha o que o Coolify fará):
+#
+#   host 127.0.0.1:8443 ──► traefik ──(rede edge, interna)──► app:3000
+#                                                              │ rede backend (interna)
+#                                                              └──► db, mailpit
+#
+# - `app` NÃO publica porta e só participa de redes `internal` (sem saída
+#   para a internet).
+# - `app-e2e` (perfil `e2e`) é a MESMA imagem publicada em 127.0.0.1:3471
+#   apenas para a suíte E2E (que precisa controlar X-Forwarded-For) e para
+#   demonstrar o risco de expor a aplicação direto. NUNCA é o desenho de
+#   produção.
+
+name: antero-atendimentos-homolog
+
+x-app-environment: &app-environment
+  APP_DATABASE_URL: postgres://antero_app:${HOMOLOG_APP_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}
+  AUTH_DATABASE_URL: postgres://antero_auth:${HOMOLOG_AUTH_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}
+  BETTER_AUTH_URL: https://localhost:${HOMOLOG_HTTPS_PORT:?}
+  BETTER_AUTH_SECRET: ${HOMOLOG_AUTH_SECRET:?}
+  # Somente o Traefik (IP fixo da rede edge): único hop que define X-Forwarded-For.
+  AUTH_TRUSTED_PROXIES: 172.29.90.2
+  SMTP_HOST: mailpit
+  SMTP_PORT: "1025"
+  SMTP_SECURE: "false"
+  MAIL_FROM: Antero Atendimento <nao-responda@antero.local>
+  # Certificado autoassinado de homologação (Traefik e SMTP STARTTLS do Mailpit).
+  NODE_EXTRA_CA_CERTS: /certs/cert.pem
+
+x-app: &app
+  image: antero-atendimentos/app:homolog
+  build:
+    context: .
+    target: runtime
+  read_only: true
+  tmpfs:
+    - /tmp
+    - /app/.next/cache:uid=1000,gid=1000
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+  pids_limit: 256
+  mem_limit: 512m
+  stop_grace_period: 30s
+  volumes:
+    - ${HOMOLOG_DIR:?}/tls/cert.pem:/certs/cert.pem:ro
+  restart: unless-stopped
+
+services:
+  db:
+    image: antero-atendimentos/postgres:17-pgtap
+    build:
+      context: ./docker/postgres
+    container_name: antero-atendimentos-homolog-db
+    restart: unless-stopped
+    # Banco DESCARTÁVEL de homologação: durabilidade desligada (como o banco de
+    # testes — o harness dos testes exige essas marcas). Nunca em produção.
+    command: ["postgres", "-c", "timezone=UTC", "-c", "log_timezone=UTC", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "full_page_writes=off"]
+    environment:
+      POSTGRES_USER: antero_admin
+      POSTGRES_PASSWORD: ${HOMOLOG_ADMIN_PASSWORD:?}
+      POSTGRES_DB: ${HOMOLOG_DB_NAME:?}
+      ANTERO_MIGRATOR_PASSWORD: ${HOMOLOG_MIGRATOR_PASSWORD:?}
+      ANTERO_APP_PASSWORD: ${HOMOLOG_APP_PASSWORD:?}
+      ANTERO_AUTH_PASSWORD: ${HOMOLOG_AUTH_PASSWORD:?}
+      ANTERO_ENABLE_PGTAP: "true"
+    ports:
+      - "127.0.0.1:${HOMOLOG_DB_PORT:?}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U antero_admin -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    networks: [backend, hostpub]
+
+  mailpit:
+    image: axllent/mailpit:v1.31.2
+    container_name: antero-atendimentos-homolog-mailpit
+    restart: unless-stopped
+    environment:
+      # STARTTLS: em produção o app exige TLS no SMTP.
+      MP_SMTP_TLS_CERT: /certs/cert.pem
+      MP_SMTP_TLS_KEY: /certs/key.pem
+    ports:
+      - "127.0.0.1:${HOMOLOG_MAILPIT_PORT:?}:8025"
+    volumes:
+      - ${HOMOLOG_DIR:?}/tls:/certs:ro
+    healthcheck:
+      test: ["CMD", "/mailpit", "readyz"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [backend, hostpub]
+
+  # Migrations: alvo `migrate` do Dockerfile (dbmate + db/migrations deste
+  # commit), como antero_migrator, SOB DEMANDA — nunca no start da aplicação.
+  migrate:
+    image: antero-atendimentos/migrate:homolog
+    build:
+      context: .
+      target: migrate
+    profiles: [tools]
+    environment:
+      DATABASE_URL: postgres://antero_migrator:${HOMOLOG_MIGRATOR_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+
+  app:
+    <<: *app
+    container_name: antero-atendimentos-homolog-app
+    environment:
+      <<: *app-environment
+    networks:
+      backend: {}
+      edge: {}
+
+  app-e2e:
+    <<: *app
+    container_name: antero-atendimentos-homolog-app-e2e
+    profiles: [e2e]
+    environment:
+      <<: *app-environment
+    ports:
+      - "127.0.0.1:${HOMOLOG_E2E_PORT:?}:3000"
+    networks: [backend, hostpub]
+
+  traefik:
+    image: traefik:v3.6@sha256:31267173a15b4944e797a76ffd9c419707c8d8b32fe5b610f80cd0cfa05f372d
+    container_name: antero-atendimentos-homolog-traefik
+    restart: unless-stopped
+    command:
+      - --providers.file.filename=/etc/traefik/dynamic.yml
+      - --entrypoints.websecure.address=:8443
+      - --entrypoints.ping.address=:8082
+      - --ping.entrypoint=ping
+      - --accesslog=true
+      - --log.level=INFO
+      - --global.sendanonymoususage=false
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    ports:
+      - "127.0.0.1:${HOMOLOG_HTTPS_PORT:?}:8443"
+    volumes:
+      - ./docker/homolog/traefik-dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ${HOMOLOG_DIR:?}/tls:/certs:ro
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping", "--entrypoints.ping.address=:8082", "--ping.entrypoint=ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      edge:
+        ipv4_address: 172.29.90.2
+      hostpub: {}
+
+networks:
+  # Sem saída para a internet: banco, e-mail e aplicação.
+  backend:
+    name: antero-atendimentos-homolog-backend
+    internal: true
+  # Traefik ↔ aplicação. IP do Traefik fixo para AUTH_TRUSTED_PROXIES.
+  edge:
+    name: antero-atendimentos-homolog-edge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.29.90.0/24
+  # Só para publicar portas em 127.0.0.1 (banco, UI do Mailpit, Traefik, app-e2e).
+  hostpub:
+    name: antero-atendimentos-homolog-hostpub
+
+volumes:
+  pgdata:
+    name: antero-atendimentos-homolog-pgdata
