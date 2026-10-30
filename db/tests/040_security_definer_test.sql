@@ -24,7 +24,8 @@ SELECT set_eq(
   ARRAY[
     'is_platform_admin()', 'is_org_member(uuid)', 'is_org_admin(uuid)', 'shares_org_with(uuid)',
     'handle_new_user()', 'handle_user_email_updated()',
-    'ingest_inbound_message(uuid,text,text,text,text)'
+    'ingest_inbound_message(uuid,text,text,text,text)',
+    'current_user_suspended_organizations()', 'set_organization_status(uuid,organization_status)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );
@@ -58,7 +59,8 @@ SELECT set_eq(
   ARRAY[
     'app.app.set_user_context(uuid)', 'app.app.current_user_id()',
     'public.is_platform_admin()', 'public.is_org_member(uuid)', 'public.is_org_admin(uuid)',
-    'public.shares_org_with(uuid)', 'public.ingest_inbound_message(uuid,text,text,text,text)'
+    'public.shares_org_with(uuid)', 'public.ingest_inbound_message(uuid,text,text,text,text)',
+    'public.current_user_suspended_organizations()', 'public.set_organization_status(uuid,organization_status)'
   ],
   'antero_app executa exatamente as funções necessárias (gatilhos e set_updated_at fora)'
 );
