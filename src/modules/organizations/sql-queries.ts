@@ -2,7 +2,7 @@ import "server-only";
 
 import { AccessDeniedError, sqlStateOf, withUserTransaction } from "@/lib/db";
 import type { ActiveContext } from "@/lib/auth/dal";
-import type { MemberRole, Organization, Profile } from "@/lib/types/database";
+import type { MemberRole, Organization, OrganizationStatus, Profile } from "@/lib/types/database";
 
 /**
  * Consultas de organização sobre o PostgreSQL próprio (Entrega 4; usadas
@@ -45,13 +45,60 @@ export async function listAllOrganizations(context: { userId: string }): Promise
   }
 }
 
+/**
+ * Suspende ou reativa uma organização — só administrador da plataforma. A
+ * autorização é da função `public.set_organization_status` (0006), conferida
+ * contra a identidade da transação; quem não é administrador recebe
+ * `AccessDeniedError`.
+ */
+export async function setOrganizationStatus(context: {
+  userId: string;
+  organizationId: string;
+  status: OrganizationStatus;
+}): Promise<OrganizationStatus> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<{ status: OrganizationStatus }>(
+        "SELECT public.set_organization_status($1::uuid, $2::public.organization_status) AS status",
+        [context.organizationId, context.status],
+      );
+      return rows[0].status;
+    });
+  } catch (error) {
+    if (sqlStateOf(error) === "42501") throw new AccessDeniedError();
+    throw queryFailure("Falha ao alterar a situação da organização", error);
+  }
+}
+
+export type SuspendedOrganization = { id: string; name: string };
+
+/**
+ * Organizações suspensas em que o usuário tem vínculo ativo, mais antigas
+ * primeiro. A RLS esconde essas linhas do membro: é esta função que permite
+ * distinguir "organização suspensa" de "sem vínculo" (`/organizacao-suspensa`).
+ */
+export async function getSuspendedOrganizations(context: { userId: string }): Promise<SuspendedOrganization[]> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<SuspendedOrganization>(
+        `SELECT s.organization_id AS id, s.organization_name AS name
+         FROM public.current_user_suspended_organizations() s`,
+      );
+      return rows;
+    });
+  } catch (error) {
+    throw queryFailure("Falha ao carregar organizações suspensas", error);
+  }
+}
+
 type ActiveMembershipRow = Organization & { role: MemberRole };
 
 /**
- * Contexto ativo do usuário (perfil + organização + papel) — a regra do
- * MVP, a mesma da versão Supabase: a associação ATIVA mais antiga
- * (`created_at`, desempate por `id`); `null` sem perfil ou sem associação
- * ativa. É daqui que o DAL (`lib/auth/dal.ts#getActiveContext`) tira o
+ * Contexto ativo do usuário (perfil + organização + papel): a associação
+ * ATIVA mais antiga (`created_at`, desempate por `id`) em organização ATIVA;
+ * `null` sem perfil ou sem associação assim. O filtro de status é explícito
+ * porque a RLS deixa o administrador da plataforma ler organizações e vínculos
+ * de qualquer situação. É daqui que o DAL (`lib/auth/dal.ts#getActiveContext`) tira o
  * `organizationId` do `OrganizationContext` — nunca do navegador.
  */
 export async function getActiveContext(context: { userId: string }): Promise<ActiveContext | null> {
@@ -70,7 +117,7 @@ export async function getActiveContext(context: { userId: string }): Promise<Act
           `SELECT m.role, ${ORGANIZATION_COLUMNS}
            FROM public.organization_members m
            JOIN public.organizations o ON o.id = m.organization_id
-           WHERE m.user_id = $1::uuid AND m.status = 'active'
+           WHERE m.user_id = $1::uuid AND m.status = 'active' AND o.status = 'active'
            ORDER BY m.created_at ASC, m.id ASC
            LIMIT 1`,
           [userId],

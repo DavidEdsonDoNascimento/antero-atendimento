@@ -1,14 +1,18 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { Logo } from "@/components/ui/logo";
+import { PlatformAdminLink } from "@/components/layout/platform-admin-link";
 import { SignOutForm } from "@/components/layout/sign-out-form";
-import { requireUser } from "@/lib/auth/dal";
+import { getSuspendedOrganizations, requireUser } from "@/lib/auth/dal";
 
 export const metadata: Metadata = { title: "Sem organização" };
 
 export default async function SemOrganizacaoPage() {
   const user = await requireUser();
+  // Vínculo com organização suspensa é outra situação, com outra mensagem.
+  if ((await getSuspendedOrganizations()).length > 0) redirect("/organizacao-suspensa");
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center px-4 py-10">
@@ -30,6 +34,7 @@ export default async function SemOrganizacaoPage() {
               Consulte <code className="text-gold-soft">docs/SETUP.md</code> para
               o procedimento de vínculo do primeiro usuário.
             </p>
+            <PlatformAdminLink />
             <SignOutForm />
           </CardContent>
         </Card>

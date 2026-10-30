@@ -129,6 +129,8 @@ test("loaders da Inbox com o contexto do DAL: cursor adulterado volta à 1ª pá
   );
 });
 
+const SERVER_ACTION_FILES = ["src/modules/organizations/actions.ts"];
+
 test("nenhum código da aplicação usa auth.api.* ou a instância do Better Auth fora de src/lib/identity", () => {
   const root = new URL("../../src/", import.meta.url).pathname;
   const offenders: string[] = [];
@@ -140,7 +142,10 @@ test("nenhum código da aplicação usa auth.api.* ou a instância do Better Aut
       } else if (/\.(ts|tsx)$/.test(entry.name)) {
         // Só código: comentários podem citar `auth.api` para explicar a regra.
         const source = readFileSync(path, "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
-        if (/\bauth\.api\b|getIdentityAuth|createIdentityAuth|signInEmail|"use server"/.test(source)) offenders.push(path);
+        if (/\bauth\.api\b|getIdentityAuth|createIdentityAuth|signInEmail/.test(source)) offenders.push(path);
+        // Autenticação nunca por Server Action (escaparia do rate limit do
+        // handler). Fora dela, cada ação é liberada aqui, nominalmente.
+        if (/"use server"/.test(source) && !SERVER_ACTION_FILES.some((file) => path.endsWith(file))) offenders.push(path);
       }
     }
   };
