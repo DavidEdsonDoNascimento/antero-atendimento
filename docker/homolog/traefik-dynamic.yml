@@ -1,0 +1,21 @@
+# Traefik de HOMOLOGAÇÃO LOCAL (provider de arquivo: sem docker.sock).
+# Imita o essencial do Coolify: termina o TLS e encaminha para a aplicação
+# pela rede interna. O entrypoint `websecure` NÃO confia em
+# X-Forwarded-* de clientes (sem forwardedHeaders.trustedIPs), então o Traefik
+# SOBRESCREVE X-Forwarded-For com o endereço real de quem conectou.
+tls:
+  certificates:
+    - certFile: /certs/cert.pem
+      keyFile: /certs/key.pem
+http:
+  routers:
+    app:
+      rule: "Host(`localhost`)"
+      entryPoints: [websecure]
+      service: app
+      tls: {}
+  services:
+    app:
+      loadBalancer:
+        servers:
+          - url: "http://app:3000"

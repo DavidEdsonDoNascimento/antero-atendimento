@@ -25,6 +25,7 @@ const identityInternals = {
     "!@/lib/identity/client",
     "!@/lib/identity/constants",
     "!@/lib/identity/errors",
+    "!@/lib/identity/lifecycle",
     "**/lib/identity/auth*",
     "**/lib/identity/options*",
     "**/lib/identity/pool*",

@@ -37,7 +37,18 @@
     "auth:provision": "node scripts/infra.mjs auth-provision",
     "db:dev-fixtures": "node scripts/infra.mjs dev-fixtures",
     "app:e2e": "node scripts/infra.mjs app-e2e",
-    "app:build": "node scripts/infra.mjs app-build"
+    "app:build": "node scripts/infra.mjs app-build",
+    "homolog:env": "node scripts/homolog.mjs env",
+    "homolog:build": "node scripts/homolog.mjs build",
+    "homolog:up": "node scripts/homolog.mjs up",
+    "homolog:migrate": "node scripts/homolog.mjs migrate",
+    "homolog:status": "node scripts/homolog.mjs status",
+    "homolog:logs": "node scripts/homolog.mjs logs",
+    "homolog:down": "node scripts/homolog.mjs down",
+    "homolog:reset": "node scripts/homolog.mjs reset",
+    "homolog:e2e": "node scripts/homolog.mjs e2e",
+    "homolog:prod": "node scripts/homolog.mjs prod",
+    "homolog:image-check": "node scripts/homolog.mjs image-check"
   },
   "dependencies": {
     "better-auth": "1.7.12",

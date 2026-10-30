@@ -4,13 +4,13 @@ import { test } from "node:test";
 import { hasSessionCookie, isPublicPath } from "./route-access.ts";
 
 test("isPublicPath: telas de autenticação e o handler /api/auth são públicos", () => {
-  for (const path of ["/login", "/recuperar-senha", "/redefinir-senha", "/api/auth", "/api/auth/sign-in/email"]) {
+  for (const path of ["/login", "/recuperar-senha", "/redefinir-senha", "/api/auth", "/api/auth/sign-in/email", "/api/health", "/api/health/ready"]) {
     assert.equal(isPublicPath(path), true, path);
   }
 });
 
 test("isPublicPath: plataforma, /sem-organizacao, raiz e prefixos parecidos são protegidos", () => {
-  for (const path of ["/", "/visao-geral", "/conversas", "/admin", "/sem-organizacao", "/loginx", "/api/authx", "/api", "/auth/confirm"]) {
+  for (const path of ["/", "/visao-geral", "/conversas", "/admin", "/sem-organizacao", "/loginx", "/api/authx", "/api/healthx", "/api/health-detalhes", "/api", "/auth/confirm"]) {
     assert.equal(isPublicPath(path), false, path);
   }
 });

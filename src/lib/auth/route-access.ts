@@ -11,6 +11,9 @@ export const PUBLIC_PREFIXES = [
   // Handler do Better Auth: login, logout e redefinição precisam funcionar
   // sem sessão; ele mesmo aplica origem/CSRF e rate limit.
   "/api/auth",
+  // Health checks do contêiner/proxy (liveness e readiness): sem login e sem
+  // dados — respondem só "ok"/"unavailable" (ver src/lib/health.ts).
+  "/api/health",
 ];
 
 export function isPublicPath(pathname: string): boolean {

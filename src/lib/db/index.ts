@@ -11,6 +11,7 @@ import "server-only";
 export { withUserTransaction } from "./transaction.ts";
 export { withOrganizationTransaction, type OrganizationContext } from "./organization.ts";
 export { closeAppPool } from "./pool.ts";
+export { pingAppDatabase } from "./health.ts";
 export {
   AccessDeniedError,
   DatabaseConfigError,

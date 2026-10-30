@@ -118,6 +118,17 @@ pnpm app:build                       # build de produção sem rede e sem .env (
 pnpm build                           # build direto no repositório
 ```
 
+Imagem Docker de produção (Entrega 7A; stack própria, só `127.0.0.1`; ver
+`docs/DEPLOY.md`):
+
+```bash
+pnpm homolog:build && pnpm homolog:up   # imagem + PostgreSQL descartável + Traefik/TLS
+pnpm homolog:image-check                # conteúdo da imagem, sem segredos
+pnpm homolog:e2e                        # E2E contra o contêiner de produção
+pnpm homolog:prod                       # proxy/XFF, migrations, ciclo de vida (~3 min)
+pnpm homolog:reset                      # remove só a homologação
+```
+
 ## 7. Encerrar
 
 ```bash

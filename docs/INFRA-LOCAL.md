@@ -325,16 +325,17 @@ Não há script. Se for realmente necessário, após `pnpm infra:stop`, remova
 projeto, conferindo os nomes antes. Nunca use comandos de limpeza global do
 Docker: outros projetos compartilham este daemon.
 
-## Docker/Coolify (preparação)
+## Docker/Coolify
 
-O futuro Dockerfile da aplicação deve usar a mesma versão do pnpm
-(`packageManager` no `package.json`; `corepack enable`) e instalar com
-`pnpm install --frozen-lockfile`. O Dockerfile definitivo, o `/api/health` e a
-configuração do Coolify pertencem a entregas posteriores.
+**Entrega 7A:** o `Dockerfile` de produção (Next standalone, pnpm 11.18.0, Node
+24), `/api/health`, `/api/health/ready`, o encerramento controlado e a
+homologação local da imagem estão prontos — ver **`docs/DEPLOY.md`**
+(`pnpm homolog:*`, stack própria `compose.homolog.yaml`, separada deste
+ambiente). A publicação no Coolify pertence à Entrega 7B.
 
-- No container, `APP_DATABASE_URL` deve apontar para o PostgreSQL pela rede
-  interna do Coolify, com o papel `antero_app`; o processo deve chamar
-  `closeAppPool()` no encerramento (SIGTERM) para devolver as conexões.
+- No container, `APP_DATABASE_URL` aponta para o PostgreSQL pela rede interna
+  do Coolify (nunca `localhost`), com o papel `antero_app`; no SIGTERM o
+  processo fecha os pools (`closeAppPool()`/`closeIdentity()`).
 - `next build` não precisa de rede (Entrega 5B): Geist e Geist Mono vêm de
   `src/app/fonts/` via `next/font/local` (OFL; ver `src/app/fonts/README.md`).
   `pnpm app:build` comprova: container `--network none`, sem `.env*`.

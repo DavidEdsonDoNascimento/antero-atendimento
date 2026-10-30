@@ -20,7 +20,12 @@ import { createTestIdentity, deleteMail, mailCount, uniqueIp, waitForMail, type 
 import { createInboxFixtures, dropInboxFixtures, type InboxFixtures } from "../db/inbox-fixtures.ts";
 
 const BASE = process.env.E2E_BASE_URL as string;
-const SESSION_COOKIE = "antero.session_token";
+// Origem PÚBLICA da aplicação (a de BETTER_AUTH_URL). Igual a BASE no `pnpm
+// app:e2e`; no contêiner de produção (`pnpm homolog:e2e`) é https e o
+// servidor é alcançado direto por http, então as duas diferem.
+const ORIGIN = process.env.E2E_ORIGIN ?? BASE;
+const SECURE = ORIGIN.startsWith("https:");
+const SESSION_COOKIE = SECURE ? "__Secure-antero.session_token" : "antero.session_token";
 
 let identity: TestIdentity;
 let fixture: pg.Client;
@@ -53,7 +58,7 @@ class Client {
     const headers = new Headers({ "x-forwarded-for": this.ip });
     if (this.cookies.size) headers.set("cookie", [...this.cookies].map(([k, v]) => `${k}=${v}`).join("; "));
     if (init.body !== undefined) headers.set("content-type", "application/json");
-    if (init.origin !== null && method !== "GET") headers.set("origin", init.origin ?? BASE);
+    if (init.origin !== null && method !== "GET") headers.set("origin", init.origin ?? ORIGIN);
     const response = await fetch(`${BASE}${path}`, {
       method,
       headers,
@@ -140,6 +145,8 @@ test("login pelo handler: cookie HttpOnly/SameSite=Lax; Inbox da organização a
   assert.ok(cookie);
   assert.match(cookie!, /HttpOnly/i);
   assert.match(cookie!, /SameSite=Lax/i);
+  // Em https (produção) o cookie leva o prefixo __Secure- e o atributo Secure.
+  assert.equal(/;\s*Secure/i.test(cookie!), SECURE);
   assert.match(cookie!, /Path=\//i);
 
   const inbox = await client.page("/conversas");
@@ -262,7 +269,7 @@ test("recuperação de senha pelo Mailpit: link, troca, sessões revogadas, toke
   assert.equal(request.status, 200);
   const mail = await waitForMail(email, seen);
   const link = mail.Text.match(/https?:\/\/\S+/)![0];
-  assert.ok(link.startsWith(`${BASE}/api/auth/reset-password/`));
+  assert.ok(link.startsWith(`${ORIGIN}/api/auth/reset-password/`));
 
   const browser = new Client();
   const callback = await browser.fetch(new URL(link).pathname + new URL(link).search);
