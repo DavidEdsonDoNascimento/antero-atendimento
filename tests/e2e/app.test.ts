@@ -455,3 +455,246 @@ test("admin da plataforma com vínculo só em organização suspensa alcança /a
     await fixture.query("DELETE FROM public.organization_members WHERE user_id = $1", [f!.more.platformAdmin]);
   }
 });
+
+// ---------------------------------------------------------------------------
+// E1B — módulos por organização
+// ---------------------------------------------------------------------------
+
+const MODULE_ROUTES = [
+  ["atendimento", "/conversas", "Conversas"],
+  ["contatos", "/contatos", "Contatos"],
+  ["automacoes", "/fluxos", "Automações"],
+  ["campanhas", "/campanhas", "Campanhas"],
+] as const;
+
+/** Ajusta a configuração como dono das tabelas, só para montar o cenário. */
+async function setModules(organizationId: string, enabled: string[]) {
+  await fixture.query("DELETE FROM public.organization_modules WHERE organization_id = $1", [organizationId]);
+  for (const name of enabled) {
+    await fixture.query("INSERT INTO public.organization_modules (organization_id, module, enabled) VALUES ($1, $2, true)", [
+      organizationId,
+      name,
+    ]);
+  }
+}
+
+const enabledModules = async (organizationId: string) =>
+  (
+    await fixture.query(
+      "SELECT module::text FROM public.organization_modules WHERE organization_id = $1 AND enabled ORDER BY module",
+      [organizationId],
+    )
+  ).rows.map((row) => row.module as string);
+
+/** O menu renderizado contém o link para esta rota? */
+const menuHasLink = (html: string, href: string) => new RegExp(`<a[^>]+href="${href}"`).test(html);
+
+/**
+ * Chama a Server Action do painel como um POST direto, no formato que o React
+ * usa para `useActionState` (id no cabeçalho, argumentos no corpo).
+ */
+async function postModuleAction(client: Client, actionId: string, fields: Record<string, string>) {
+  const form = new FormData();
+  for (const [name, value] of Object.entries(fields)) form.set(`_1_${name}`, value);
+  // Por último, como no React: o servidor resolve a linha 0 ao recebê-la.
+  form.set("0", JSON.stringify(["$undefined", "$K1"]));
+  const headers = new Headers({ "x-forwarded-for": client.ip, origin: ORIGIN, "next-action": actionId, accept: "text/x-component" });
+  if (client.cookies.size) headers.set("cookie", [...client.cookies].map(([k, v]) => `${k}=${v}`).join("; "));
+  const response = await fetch(`${BASE}/admin/organizacoes/${fields.organizationId}`, {
+    method: "POST",
+    headers,
+    body: form,
+    redirect: "manual",
+  });
+  return { status: response.status, text: await response.text() };
+}
+
+const moduleActionIdOf = (html: string) =>
+  /\$ACTION_ID_([0-9a-f]{20,})/.exec(html)?.[1] ??
+  /&quot;id&quot;:&quot;([0-9a-f]{20,})&quot;/.exec(html)?.[1] ??
+  /"id":"([0-9a-f]{20,})"/.exec(html)?.[1];
+
+test("módulos: menu e rotas seguem a organização ativa; URL direta é negada no servidor", async () => {
+  const owner = await loggedIn("aOwner");
+  const bOwner = await loggedIn("bOwner");
+  await setModules(f!.orgA, ["automacoes"]);
+  await setModules(f!.orgB, ["atendimento", "contatos", "campanhas"]);
+  try {
+    const home = await owner.page("/visao-geral");
+    assert.equal(home.status, 200);
+    assert.ok(menuHasLink(home.html, "/fluxos"), "A: Automações no menu");
+    for (const href of ["/conversas", "/contatos", "/campanhas"]) assert.ok(!menuHasLink(home.html, href), `A: sem ${href} no menu`);
+    for (const href of ["/visao-geral", "/equipe", "/configuracoes"]) assert.ok(menuHasLink(home.html, href), `A: núcleo ${href}`);
+
+    for (const path of ["/conversas", `/conversas/${f!.conv.cH}`]) {
+      const denied = await owner.page(path);
+      assert.equal(denied.redirect, "/modulo-indisponivel?modulo=atendimento", path);
+      assert.doesNotMatch(denied.html, /h7 atendente|Histórico/, path);
+    }
+    assert.equal((await owner.page("/contatos")).redirect, "/modulo-indisponivel?modulo=contatos");
+    assert.equal((await owner.page("/campanhas")).redirect, "/modulo-indisponivel?modulo=campanhas");
+    const enabled = await owner.page("/fluxos");
+    assert.equal(enabled.status, 200);
+    assert.equal(enabled.redirect, null);
+    assert.match(enabled.html, /recurso em desenvolvimento/);
+
+    // A tela de indisponível não confia no parâmetro.
+    const screen = await owner.page("/modulo-indisponivel?modulo=atendimento");
+    assert.match(screen.html, /Atendimento não está disponível/);
+    assert.match(screen.html, /Org A Integração/);
+    assert.match((await owner.page("/modulo-indisponivel?modulo=%3Cscript%3E")).html, /Recurso não disponível/);
+    assert.equal((await owner.page("/modulo-indisponivel?modulo=automacoes")).redirect, "/fluxos");
+
+    // Outra organização, outra configuração, mesma plataforma.
+    const homeB = await bOwner.page("/visao-geral");
+    for (const href of ["/conversas", "/contatos", "/campanhas"]) assert.ok(menuHasLink(homeB.html, href), `B: ${href} no menu`);
+    assert.ok(!menuHasLink(homeB.html, "/fluxos"), "B: sem Automações no menu");
+    assert.equal((await bOwner.page("/conversas")).status, 200);
+    assert.match((await bOwner.page("/conversas")).html, /Contato B2/);
+    assert.equal((await bOwner.page("/fluxos")).redirect, "/modulo-indisponivel?modulo=automacoes");
+    const campaigns = await bOwner.page("/campanhas");
+    assert.equal(campaigns.status, 200);
+    assert.match(campaigns.html, /o envio não está disponível/);
+  } finally {
+    await setModules(f!.orgA, ["atendimento"]);
+    await setModules(f!.orgB, ["atendimento"]);
+  }
+  // Dados preservados: a Inbox volta intacta.
+  assert.match((await owner.page(`/conversas/${f!.conv.cH}`)).html, /h7 atendente/);
+});
+
+test("módulos: painel do admin altera na requisição seguinte; dependência respeitada; outra organização intacta", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const owner = await loggedIn("aOwner");
+  const list = await platformAdmin.page("/admin");
+  assert.match(list.html, new RegExp(`/admin/organizacoes/${f!.orgA}`));
+  assert.match(list.html, /Módulos habilitados/);
+
+  const panel = await platformAdmin.page(`/admin/organizacoes/${f!.orgA}`);
+  assert.equal(panel.status, 200, "admin da plataforma sem vínculo abre o painel");
+  assert.match(panel.html, /Org A Integração/);
+  for (const label of ["Atendimento", "Automações", "Campanhas", "Contatos"]) assert.match(panel.html, new RegExp(label));
+  // O React separa trechos de texto com comentários no HTML.
+  assert.match(panel.html.replaceAll("<!-- -->", ""), /Depende de Contatos/);
+  assert.match(panel.html, /Habilite Contatos antes de habilitar Campanhas/);
+  const actionId = moduleActionIdOf(panel.html);
+  assert.ok(actionId, "id da ação no painel");
+  assert.equal((await platformAdmin.page("/admin/organizacoes/nao-e-uuid")).status, 404);
+  assert.equal((await platformAdmin.page("/admin/organizacoes/00000000-0000-4000-8000-000000000000")).status, 404);
+
+  const post = (module: string, enabled: boolean, organizationId = f!.orgA) =>
+    postModuleAction(platformAdmin, actionId, { organizationId, module, enabled: String(enabled) });
+  try {
+    // Sem Contatos, Campanhas é recusado com explicação.
+    const refused = await post("campanhas", true);
+    assert.match(refused.text, /Habilite Contatos antes de habilitar Campanhas/);
+    assert.deepEqual(await enabledModules(f!.orgA), ["atendimento"]);
+
+    assert.match((await post("contatos", true)).text, /Contatos habilitado/);
+    assert.match((await post("campanhas", true)).text, /Campanhas habilitado/);
+    assert.deepEqual(await enabledModules(f!.orgA), ["atendimento", "campanhas", "contatos"]);
+    assert.match((await post("contatos", false)).text, /Desabilite Campanhas antes de desabilitar Contatos/);
+    assert.deepEqual(await enabledModules(f!.orgA), ["atendimento", "campanhas", "contatos"]);
+
+    // Requisição seguinte, mesma sessão do owner.
+    const home = await owner.page("/visao-geral");
+    assert.ok(menuHasLink(home.html, "/campanhas"));
+    assert.equal((await owner.page("/campanhas")).status, 200);
+
+    assert.match((await post("atendimento", false)).text, /Atendimento desabilitado/);
+    assert.equal((await owner.page("/conversas")).redirect, "/modulo-indisponivel?modulo=atendimento");
+    assert.ok(!menuHasLink((await owner.page("/visao-geral")).html, "/conversas"));
+    assert.deepEqual(await enabledModules(f!.orgB), ["atendimento"], "B não muda");
+    assert.equal((await (await loggedIn("bOwner")).page("/conversas")).status, 200);
+
+    // Entrada adulterada: nada muda, com resposta segura.
+    for (const fields of [
+      { organizationId: "nao-e-uuid", module: "atendimento", enabled: "true" },
+      { organizationId: f!.orgA, module: "financeiro", enabled: "true" },
+      { organizationId: f!.orgA, module: "atendimento", enabled: "talvez" },
+    ]) {
+      assert.match((await postModuleAction(platformAdmin, actionId, fields)).text, /Dados inválidos/);
+    }
+    assert.match((await post("atendimento", true, "00000000-0000-4000-8000-000000000000")).text, /Organização não encontrada/);
+    assert.deepEqual(await enabledModules(f!.orgA), ["campanhas", "contatos"]);
+  } finally {
+    await setModules(f!.orgA, ["atendimento"]);
+  }
+});
+
+test("módulos: usuários comuns não acessam o painel nem a ação, mesmo por POST direto", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const panel = await platformAdmin.page(`/admin/organizacoes/${f!.orgA}`);
+  const actionId = moduleActionIdOf(panel.html)!;
+  const fields = { organizationId: f!.orgA, module: "contatos", enabled: "true" };
+
+  const owner = await loggedIn("aOwner");
+  const attendant = await loggedIn("aAttendant");
+  const outsider = await loggedIn("bOwner");
+  for (const client of [owner, attendant, outsider]) {
+    const page = await client.page(`/admin/organizacoes/${f!.orgA}`);
+    assert.equal(page.redirect, "/visao-geral");
+    assert.doesNotMatch(page.html, /Org A Integração[\s\S]*Depende de Contatos/);
+  }
+  const anonymous = await new Client().page(`/admin/organizacoes/${f!.orgA}`);
+  assert.equal(anonymous.redirect, "/login");
+
+  // Inclusive a própria organização e sem sessão.
+  for (const client of [new Client(), owner, attendant, outsider]) {
+    await postModuleAction(client, actionId, fields);
+    assert.deepEqual(await enabledModules(f!.orgA), ["atendimento"]);
+  }
+});
+
+test("módulos: usuário com duas organizações recebe a configuração do contexto ativo", async () => {
+  const multi = await loggedIn("multi");
+  await setModules(f!.orgB, ["contatos"]);
+  await setModules(f!.orgA, ["atendimento"]);
+  try {
+    // B é o vínculo mais antigo: vale a configuração de B, não a de A.
+    assert.equal((await multi.page("/conversas")).redirect, "/modulo-indisponivel?modulo=atendimento");
+    assert.equal((await multi.page("/contatos")).status, 200);
+    await setStatus(f!.orgB, "inactive");
+    assert.match((await multi.page("/conversas")).html, /Histórico/);
+    assert.equal((await multi.page("/contatos")).redirect, "/modulo-indisponivel?modulo=contatos");
+  } finally {
+    await setStatus(f!.orgB, "active");
+    await setModules(f!.orgB, ["atendimento"]);
+  }
+});
+
+test("módulos: suspensão prevalece sobre os módulos; reativação preserva a configuração", async () => {
+  const owner = await loggedIn("aOwner");
+  const platformAdmin = await loggedIn("platformAdmin");
+  await setModules(f!.orgA, ["atendimento", "automacoes", "contatos"]);
+  await setStatus(f!.orgA, "inactive");
+  try {
+    for (const [, path] of MODULE_ROUTES) assert.equal((await owner.page(path)).redirect, "/organizacao-suspensa", path);
+    assert.equal((await owner.page("/modulo-indisponivel?modulo=contatos")).redirect, "/organizacao-suspensa");
+    // O admin da plataforma ainda vê e ajusta a configuração da suspensa.
+    const panel = await platformAdmin.page(`/admin/organizacoes/${f!.orgA}`);
+    assert.equal(panel.status, 200);
+    assert.match(panel.html, /nenhum módulo opera/);
+  } finally {
+    await setStatus(f!.orgA, "active");
+  }
+  assert.deepEqual(await enabledModules(f!.orgA), ["atendimento", "automacoes", "contatos"]);
+  assert.equal((await owner.page("/fluxos")).status, 200);
+  await setModules(f!.orgA, ["atendimento"]);
+});
+
+test("módulos: toda rota do catálogo é protegida (organização sem nenhum módulo)", async () => {
+  const owner = await loggedIn("aOwner");
+  await setModules(f!.orgA, []);
+  try {
+    for (const [name, path, label] of MODULE_ROUTES) {
+      assert.equal((await owner.page(path)).redirect, `/modulo-indisponivel?modulo=${name}`, path);
+      const home = await owner.page("/visao-geral");
+      assert.ok(!menuHasLink(home.html, path), `${label} fora do menu`);
+    }
+    // O núcleo continua: visão geral, equipe e configurações.
+    for (const path of ["/visao-geral", "/equipe", "/configuracoes"]) assert.equal((await owner.page(path)).status, 200, path);
+  } finally {
+    await setModules(f!.orgA, ["atendimento"]);
+  }
+});
