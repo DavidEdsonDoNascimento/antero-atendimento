@@ -35,7 +35,9 @@ Criado automaticamente por gatilho ao surgir um usuário no Auth
 acessar o schema `auth`.
 
 ### organizations
-`name`, `slug` (único), `status` (`active`/`inactive`).
+`name`, `slug` (único), `status` (`active`/`inactive`). `inactive` significa
+**suspensa** (ver "Suspensão de organizações"). Pela aplicação, só `name` é
+editável; `status` muda apenas por `set_organization_status`.
 
 ### organization_members
 Vínculo usuário↔organização com `role` (`owner`/`admin`/`attendant`) e `status`
@@ -45,7 +47,9 @@ organizações no futuro; no MVP a interface usa a primeira associação ativa.
 
 ### whatsapp_accounts
 Canal por organização: `provider` (`development`/`cloud_api`),
-`external_account_id`, `phone_number`, `display_name`, `status`.
+`external_account_id`, `phone_number`, `display_name`, `status`. Somente leitura
+para a aplicação desde a E1A: esses campos decidirão para qual empresa vão os
+webhooks. A conexão real chegará por operação própria e autorizada.
 
 ## Tabelas do Ciclo 2 (Etapa 1 — schema fundamental)
 
@@ -187,26 +191,33 @@ de RLS **sem recursão** (rodam como owner e ignoram o RLS ao ler
 totalmente qualificadas.
 
 - `is_platform_admin()` — o usuário é admin global da plataforma?
-- `is_org_member(org_id)` — é membro ativo da organização?
-- `is_org_admin(org_id)` — é `owner`/`admin` ativo da organização?
-- `shares_org_with(user_id)` — compartilha organização com outro usuário?
+- `is_org_member(org_id)` — é membro ativo da organização, e ela está ativa?
+- `is_org_admin(org_id)` — é `owner`/`admin` ativo da organização, e ela está ativa?
+- `shares_org_with(user_id)` — compartilha organização ativa com outro usuário?
   (usado para exibir colegas de equipe)
+- `current_user_suspended_organizations()` — organizações suspensas em que o
+  próprio usuário tem vínculo ativo (id e nome).
+- `set_organization_status(org_id, status)` — suspende ou reativa; exclusiva do
+  admin da plataforma, conferida dentro da função.
 
 ## Políticas de RLS (resumo)
 
 | Tabela | SELECT | INSERT | UPDATE | DELETE |
 |--------|--------|--------|--------|--------|
 | profiles | próprio, colega de org, admin plataforma | (gatilho) | próprio | — |
-| organizations | membro, admin plataforma | admin plataforma | admin da org, admin plataforma | admin plataforma |
+| organizations | membro, admin plataforma | admin plataforma | admin da org, admin plataforma (só `name`) | admin plataforma |
 | organization_members | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
-| whatsapp_accounts | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
+| whatsapp_accounts | membro, admin plataforma | — | — | — |
 | contacts | membro ativo da org | — | — | — |
 | conversations | membro ativo da org | — | — | — |
 | messages | membro ativo da org | — | — | — |
 
-`—` nas três tabelas do Ciclo 2 significa "sem política": nenhum papel
-escreve direto por INSERT/UPDATE/DELETE via API. A escrita chega por função
-restrita (Etapa 3 em diante).
+`—` significa "sem política": nenhum papel escreve direto por
+INSERT/UPDATE/DELETE via API. Em `contacts`, `conversations` e `messages`, a
+escrita chega por função restrita (Etapa 3 em diante). Em `whatsapp_accounts`,
+ainda não há operação de escrita pela aplicação.
+
+"Membro" e "admin da org" valem só para organização **ativa** (E1A).
 
 Garantias exigidas e atendidas:
 
@@ -221,6 +232,34 @@ Garantias exigidas e atendidas:
   `is_platform_admin()`: administração da plataforma é distinta de pertencer
   à organização, e o conteúdo de conversas e mensagens de clientes é
   sensível.
+
+## Suspensão de organizações (E1A)
+
+Migration `0006_organization_guard`. Uma organização `inactive` não opera:
+
+- **Banco:** a regra está em `is_org_member`, `is_org_admin` e `shares_org_with`,
+  então vale para todas as políticas, para `withOrganizationTransaction` e para
+  `ingest_inbound_message`. Atinge a sessão já aberta na requisição seguinte.
+- **Aplicação:** `getActiveContext` ignora organização suspensa. Sem outra ativa,
+  `requireActiveContext` leva a `/organizacao-suspensa`, distinta de
+  `/sem-organizacao`. O login continua válido.
+- **Vários vínculos:** a suspensão vale por organização. O contexto passa para a
+  associação ativa mais antiga em organização ativa.
+- **Dados:** nada é apagado; reativar restaura as permissões dos membros ativos.
+- **Admin da plataforma:** continua vendo organização, vínculos, canal e status,
+  e não lê contatos, conversas nem mensagens. Se também for membro da suspensa,
+  o vínculo não opera. `/admin` não depende de organização ativa.
+
+A única porta de escrita de `status` é `set_organization_status`, chamada pela
+Server Action de `/admin`, que confere o papel no DAL e de novo no banco. Nem o
+admin da plataforma altera a coluna por UPDATE direto.
+
+**Custo:** `is_org_member` ganhou um JOIN com `organizations` e roda por linha.
+Medido com `EXPLAIN ANALYZE`, como `antero_app`, com 2 organizações × 20 mil
+conversas e 400 mil mensagens: lista da Inbox de ~113 ms para ~165 ms, filtro
+`open` de ~117 ms para ~177 ms, histórico abaixo de 1 ms nos dois casos. O índice
+`(organization_id, last_message_at DESC, id DESC)` leva a lista a ~0,3 ms, mas não
+ajuda o filtro `open`; não foi criado, porque a escala atual não exige.
 
 ## Administrador da plataforma vs. proprietário
 
@@ -251,6 +290,7 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0003_atendimento` | `contacts`, `conversations`, `messages` (idêntica à original) | 0001 |
 | `0004_atendimento_rls` | as 3 políticas de leitura do Ciclo 2 | 0003 |
 | `0005_ingest_inbound_message` | função de ingestão | 0001, 0003 |
+| `0006_organization_guard` | suspensão efetiva, `set_organization_status`, restrição de escrita em `organizations` e `whatsapp_accounts` | 0001–0005 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -355,7 +395,8 @@ de equipe):
   papel, inclusive `owner`.
 
 Decidir (ex.: só `owner` gerencia `owner`/`admin`; pelo menos um `owner`
-ativo sempre) e implementar com nova migration + testes pgTAP.
+ativo sempre) e implementar com nova migration + testes pgTAP. A E1A não alterou
+estas regras; elas só deixam de valer enquanto a organização estiver suspensa.
 
 ## Camada de acesso da aplicação (Entrega 3)
 
@@ -416,6 +457,8 @@ explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
 | `conversations` | `listConversationMessages(ctx, id, params)` | histórico paginado |
 | `organizations` | `getActiveContext({ userId })` | contexto ativo do DAL (`lib/auth/dal.ts`) |
 | `organizations` | `listAllOrganizations({ userId })` | `/admin` (confere o papel no banco) |
+| `organizations` | `setOrganizationStatus({ userId, organizationId, status })` | suspender/reativar em `/admin` |
+| `organizations` | `getSuspendedOrganizations({ userId })` | `/organizacao-suspensa` |
 | `users` | `listOrganizationMembers(ctx)` | Equipe |
 | `users` | `getOwnProfile({ userId })` | perfil do próprio usuário (DAL) |
 | `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | Configurações |

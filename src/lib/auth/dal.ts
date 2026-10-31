@@ -8,7 +8,10 @@ import type { OrganizationContext } from "@/lib/db";
 import { IdentityUnavailableError } from "@/lib/identity/errors";
 import { getValidatedSession } from "@/lib/identity/session";
 import type { MemberRole, Organization, Profile } from "@/lib/types/database";
-import { getActiveContext as loadActiveContext } from "@/modules/organizations/sql-queries";
+import {
+  getActiveContext as loadActiveContext,
+  getSuspendedOrganizations as loadSuspendedOrganizations,
+} from "@/modules/organizations/sql-queries";
 import { getOwnProfile } from "@/modules/users/sql-queries";
 
 /**
@@ -54,9 +57,9 @@ export type ActiveContext = {
 
 /**
  * Resolve o contexto ativo do usuário: perfil + organização + papel.
- * Regra preservada do MVP: a associação ATIVA mais antiga (desempate por id);
- * vínculos desativados ou convites não contam. Retorna `null` quando o
- * usuário não tem nenhuma. Não há seletor: nada da URL, cookie ou
+ * Regra preservada do MVP: a associação ATIVA mais antiga (desempate por id)
+ * em organização ATIVA; vínculos desativados, convites e organizações suspensas
+ * não contam. Retorna `null` quando o usuário não tem nenhuma. Não há seletor: nada da URL, cookie ou
  * formulário escolhe a organização.
  */
 export const getActiveContext = cache(
@@ -66,9 +69,18 @@ export const getActiveContext = cache(
   },
 );
 
+/** Organizações suspensas em que o usuário da sessão tem vínculo ativo. */
+export const getSuspendedOrganizations = cache(async () => {
+  const user = await requireUser();
+  return loadSuspendedOrganizations({ userId: user.id });
+});
+
 export const requireActiveContext = cache(async (): Promise<ActiveContext> => {
   const context = await getActiveContext();
-  if (!context) redirect("/sem-organizacao");
+  if (!context) {
+    const suspended = await getSuspendedOrganizations();
+    redirect(suspended.length > 0 ? "/organizacao-suspensa" : "/sem-organizacao");
+  }
   return context;
 });
 

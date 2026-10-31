@@ -153,10 +153,12 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `000_infra_roles_test` | papéis e privilégios de base |
 | `010_identity_test` | schema do Better Auth (uuid, FKs), gatilhos de perfil, separação `antero_app`/`antero_auth` |
 | `020_user_context_test` | contexto de usuário preso à transação, sem vazamento |
-| `030_rls_policies_test` | as 17 políticas por comportamento |
+| `030_rls_policies_test` | as políticas de RLS por comportamento |
 | `040_security_definer_test` | funções privilegiadas: dono, `search_path`, grants, autorização |
 | `050_ingest_inbound_message_test` | as 69 asserções originais da ingestão + isolamento entre orgs |
 | `060_ingest_concurrency_test` | concorrência real com duas conexões (dblink) |
+| `070_organization_guard_test` | suspensão efetiva, campos protegidos de `organizations`, canal só leitura |
+| `071_organization_status_operation_test` | funções da suspensão: autorização, catálogo e privilégios efetivos |
 
 ## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 

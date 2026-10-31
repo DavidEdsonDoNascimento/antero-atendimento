@@ -36,7 +36,7 @@ export const memberStatusTone: Record<MemberStatus, BadgeTone> = {
 
 export const orgStatusLabel: Record<OrganizationStatus, string> = {
   active: "Ativa",
-  inactive: "Inativa",
+  inactive: "Suspensa",
 };
 
 export const orgStatusTone: Record<OrganizationStatus, BadgeTone> = {

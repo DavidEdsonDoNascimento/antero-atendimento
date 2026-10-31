@@ -201,7 +201,7 @@ test("rate limit no caminho da interface: 5 erros por minuto e a 6ª tentativa (
   assert.equal((await new Client().signIn("aAttendant")).status, 200);
 });
 
-test("papéis: atendente sem /admin; admin da plataforma sem organização → /sem-organizacao", async () => {
+test("papéis: atendente sem /admin; admin da plataforma não depende de organização ativa", async () => {
   const attendant = await loggedIn("aAttendant");
   const admin = await attendant.page("/admin");
   assert.equal(admin.redirect, "/visao-geral");
@@ -209,7 +209,11 @@ test("papéis: atendente sem /admin; admin da plataforma sem organização → /
   assert.equal((await attendant.page("/equipe")).status, 200);
 
   const platformAdmin = await loggedIn("platformAdmin");
-  assert.equal((await platformAdmin.page("/admin")).redirect, "/sem-organizacao");
+  const adminPage = await platformAdmin.page("/admin");
+  assert.equal(adminPage.status, 200);
+  assert.equal(adminPage.redirect, null);
+  assert.match(adminPage.html, /Org A Integração/);
+  assert.equal((await platformAdmin.page("/conversas")).redirect, "/sem-organizacao");
 });
 
 test("organização ativa: vínculo mais antigo; desativado e sem vínculo → /sem-organizacao; URL não escolhe empresa", async () => {
@@ -305,4 +309,149 @@ test("recuperação de senha pelo Mailpit: link, troca, sessões revogadas, toke
     assert.equal(refused.status, 403, redirectTo);
   }
   assert.equal(await mailCount(email), count);
+});
+
+// ---------------------------------------------------------------------------
+// E1A — suspensão de organizações
+// ---------------------------------------------------------------------------
+
+const setStatus = (organizationId: string, status: "active" | "inactive") =>
+  fixture.query("UPDATE public.organizations SET status = $2 WHERE id = $1", [organizationId, status]);
+const statusOf = async (organizationId: string) =>
+  (await fixture.query("SELECT status FROM public.organizations WHERE id = $1", [organizationId])).rows[0].status as string;
+
+/**
+ * Chama a Server Action como um POST direto, sem a interface: formulário
+ * multipart com o id da ação tirado do HTML de /admin (`$ACTION_ID_...`).
+ */
+async function postStatusAction(client: Client, actionId: string, organizationId: string, status: string) {
+  const form = new FormData();
+  form.set(`$ACTION_ID_${actionId}`, "");
+  form.set("organizationId", organizationId);
+  form.set("status", status);
+  const headers = new Headers({ "x-forwarded-for": client.ip, origin: ORIGIN });
+  if (client.cookies.size) headers.set("cookie", [...client.cookies].map(([k, v]) => `${k}=${v}`).join("; "));
+  return fetch(`${BASE}/admin`, { method: "POST", headers, body: form, redirect: "manual" });
+}
+
+test("suspensão: sessão existente perde o acesso e vê a tela própria; URL direta não contorna; reativação restaura", async () => {
+  // Login novo: a sessão do aOwner foi revogada em um teste anterior.
+  const owner = await loggedIn("aOwner");
+  const attendant = await loggedIn("aAttendant");
+  assert.equal((await owner.page("/conversas")).status, 200);
+
+  await setStatus(f!.orgA, "inactive");
+  try {
+    for (const client of [owner, attendant]) {
+      for (const path of ["/visao-geral", "/conversas", `/conversas/${f!.conv.cH}`, "/contatos", "/fluxos", "/equipe", "/configuracoes"]) {
+        const page = await client.page(path);
+        assert.equal(page.redirect, "/organizacao-suspensa", path);
+        assert.doesNotMatch(page.html, /h7 atendente|Histórico|Org B Integração/, path);
+      }
+    }
+    // A sessão continua válida (identidade): /login leva à plataforma.
+    assert.equal((await owner.page("/login")).redirect, "/visao-geral");
+
+    const screen = await owner.page("/organizacao-suspensa");
+    assert.equal(screen.status, 200);
+    assert.match(screen.html, /Organização suspensa/);
+    assert.match(screen.html, /Org A Integração/);
+    assert.doesNotMatch(screen.html, /Nenhuma organização vinculada/);
+    assert.equal((await owner.page("/sem-organizacao")).redirect, "/organizacao-suspensa");
+    // Não é admin da plataforma: /admin → /visao-geral → /organizacao-suspensa.
+    const denied = await owner.page("/admin");
+    assert.equal(denied.redirect, "/visao-geral");
+    assert.doesNotMatch(denied.html, /Org B Integração/);
+  } finally {
+    await setStatus(f!.orgA, "active");
+  }
+
+  assert.equal((await owner.page("/conversas")).status, 200);
+  assert.match((await owner.page(`/conversas/${f!.conv.cH}`)).html, /h7 atendente/);
+  // Sem suspensão, a tela não se aplica.
+  assert.equal((await owner.page("/organizacao-suspensa")).redirect, "/visao-geral");
+});
+
+test("suspensão: sem vínculo continua em /sem-organizacao; outra empresa e vínculo múltiplo seguem operando", async () => {
+  const nobody = await loggedIn("nobody");
+  const bOwner = await loggedIn("bOwner");
+  const multi = await loggedIn("multi");
+  const cH = f!.conv.cH;
+
+  await setStatus(f!.orgB, "inactive");
+  try {
+    assert.equal((await nobody.page("/conversas")).redirect, "/sem-organizacao");
+    assert.equal((await nobody.page("/organizacao-suspensa")).redirect, "/visao-geral");
+    assert.equal((await bOwner.page("/conversas")).redirect, "/organizacao-suspensa");
+    // multi: B (vínculo mais antigo) suspensa → passa a operar em A, sem bloqueio.
+    const inbox = await multi.page("/conversas");
+    assert.equal(inbox.status, 200);
+    assert.match(inbox.html, /Histórico/);
+    assert.doesNotMatch(inbox.html, /Contato B2/);
+    assert.match((await multi.page(`/conversas/${cH}`)).html, /h7 atendente/);
+    assert.match((await multi.page(`/conversas/${f!.conv.cB2}`)).html, /Conversa não encontrada/);
+  } finally {
+    await setStatus(f!.orgB, "active");
+  }
+});
+
+test("Server Action de status: só o admin da plataforma; POST direto de outros papéis não tem efeito", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const owner = await loggedIn("aOwner");
+  const attendant = await loggedIn("aAttendant");
+
+  const adminPage = await platformAdmin.page("/admin");
+  const actionId = /\$ACTION_ID_([0-9a-f]+)/.exec(adminPage.html)?.[1];
+  assert.ok(actionId, "formulário da ação em /admin");
+
+  // Sem sessão, atendente e owner, inclusive o owner tentando se reativar.
+  for (const client of [new Client(), attendant, owner]) {
+    const denied = await postStatusAction(client, actionId, f!.orgB, "inactive");
+    assert.notEqual(denied.status, 200);
+    assert.equal(await statusOf(f!.orgB), "active");
+  }
+  await setStatus(f!.orgA, "inactive");
+  try {
+    const denied = await postStatusAction(owner, actionId, f!.orgA, "active");
+    assert.notEqual(denied.status, 200);
+    assert.equal(await statusOf(f!.orgA), "inactive");
+
+    // O admin da plataforma vê a suspensa em /admin, mesmo sem organização ativa.
+    assert.match((await platformAdmin.page("/admin")).html, /Suspensa/);
+    const invalid = await postStatusAction(platformAdmin, actionId, "nao-e-uuid", "active");
+    assert.notEqual(invalid.status, 200);
+    assert.equal(await statusOf(f!.orgA), "inactive");
+
+    const allowed = await postStatusAction(platformAdmin, actionId, f!.orgA, "active");
+    assert.ok(allowed.status < 400, `status ${allowed.status}`);
+    assert.equal(await statusOf(f!.orgA), "active");
+    assert.equal((await owner.page("/conversas")).status, 200);
+
+    const suspend = await postStatusAction(platformAdmin, actionId, f!.orgA, "inactive");
+    assert.ok(suspend.status < 400, `status ${suspend.status}`);
+    assert.equal(await statusOf(f!.orgA), "inactive");
+    assert.equal((await owner.page("/conversas")).redirect, "/organizacao-suspensa");
+  } finally {
+    await setStatus(f!.orgA, "active");
+  }
+});
+
+test("admin da plataforma com vínculo só em organização suspensa alcança /admin para reativá-la", async () => {
+  await fixture.query(
+    "INSERT INTO public.organization_members (organization_id, user_id, role, status) VALUES ($1, $2, 'owner', 'active')",
+    [f!.orgC, f!.more.platformAdmin],
+  );
+  const platformAdmin = await loggedIn("platformAdmin");
+  await setStatus(f!.orgC, "inactive");
+  try {
+    assert.equal((await platformAdmin.page("/visao-geral")).redirect, "/organizacao-suspensa");
+    const screen = await platformAdmin.page("/organizacao-suspensa");
+    assert.match(screen.html, /href="\/admin"/);
+    const admin = await platformAdmin.page("/admin");
+    assert.equal(admin.status, 200);
+    assert.match(admin.html, /Org C Vazia/);
+  } finally {
+    await setStatus(f!.orgC, "active");
+    await fixture.query("DELETE FROM public.organization_members WHERE user_id = $1", [f!.more.platformAdmin]);
+  }
 });

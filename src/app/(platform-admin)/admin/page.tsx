@@ -5,8 +5,10 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconShield } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
+import { SubmitButton } from "@/components/ui/submit-button";
 import { requirePlatformAdmin } from "@/lib/auth/dal";
 import { orgStatusLabel, orgStatusTone } from "@/lib/labels";
+import { setOrganizationStatusAction } from "@/modules/organizations/actions";
 import { listAllOrganizations } from "@/modules/organizations/sql-queries";
 
 export const metadata: Metadata = { title: "Admin da plataforma" };
@@ -43,6 +45,7 @@ export default async function AdminPage() {
                   <th className="px-5 py-3 font-medium">Identificador</th>
                   <th className="px-5 py-3 font-medium">Situação</th>
                   <th className="px-5 py-3 font-medium">Criada em</th>
+                  <th className="px-5 py-3 font-medium">Ações</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-line">
@@ -60,6 +63,30 @@ export default async function AdminPage() {
                     <td className="px-5 py-3 text-muted">
                       {dateFormatter.format(new Date(org.created_at))}
                     </td>
+                    <td className="px-5 py-3">
+                      {org.status === "active" ? (
+                        <details>
+                          <summary className="cursor-pointer text-muted">
+                            Suspender
+                          </summary>
+                          <form action={setOrganizationStatusAction} className="mt-2">
+                            <input type="hidden" name="organizationId" value={org.id} />
+                            <input type="hidden" name="status" value="inactive" />
+                            <SubmitButton variant="danger" size="sm" pendingLabel="Suspendendo…">
+                              Confirmar suspensão
+                            </SubmitButton>
+                          </form>
+                        </details>
+                      ) : (
+                        <form action={setOrganizationStatusAction}>
+                          <input type="hidden" name="organizationId" value={org.id} />
+                          <input type="hidden" name="status" value="active" />
+                          <SubmitButton variant="secondary" size="sm" pendingLabel="Reativando…">
+                            Reativar
+                          </SubmitButton>
+                        </form>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -69,8 +96,9 @@ export default async function AdminPage() {
       )}
 
       <p className="text-xs text-muted-2">
-        Criar, ativar e desativar organizações pela interface, além da situação
-        das integrações, chega em uma etapa futura. Esta área é distinta do papel
+        Suspender uma organização bloqueia o acesso dos membros sem apagar dados;
+        reativar restaura as permissões. Criar organizações e a situação das
+        integrações chegam em uma etapa futura. Esta área é distinta do papel
         de proprietário de uma organização: o acesso é controlado pelo campo
         <code className="mx-1 text-gold-soft">is_platform_admin</code> e
         verificado no servidor.

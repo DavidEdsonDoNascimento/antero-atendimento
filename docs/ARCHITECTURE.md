@@ -31,8 +31,10 @@ src/
     api/auth/[...all]/   # handler HTTP do Better Auth
     (platform)/          # área autenticada (sidebar + header)
       visao-geral/  conversas/  contatos/  fluxos/  equipe/
-      configuracoes/  admin/    # admin da plataforma (is_platform_admin)
-    sem-organizacao/     # usuário autenticado sem organização ativa
+      configuracoes/
+    (platform-admin)/admin/  # admin da plataforma (is_platform_admin), sem exigir organização ativa
+    sem-organizacao/     # usuário autenticado sem vínculo com organização
+    organizacao-suspensa/  # vínculo ativo, mas a organização está suspensa
   components/
     ui/                  # design system (Button, Card, Field, Badge, ...)
     layout/              # Sidebar, Header, UserMenu, navegação
@@ -69,7 +71,8 @@ sugestão do escopo, adaptando nomes de rotas para português (`visao-geral`,
 1. **Proxy** (`proxy.ts`): redirecionamento otimista para `/login` sem o
    cookie de sessão (não consulta o banco; não é a defesa principal).
 2. **DAL** (`lib/auth/dal.ts`): verifica sessão e resolve a organização ativa
-   perto do dado. Toda página/ação autenticada passa por aqui.
+   perto do dado (organização suspensa não conta). Toda página/ação autenticada
+   passa por aqui.
 3. **RLS no Postgres**: a defesa definitiva. Mesmo que a UI falhe, o banco
    impede acesso cruzado entre organizações. Ver `docs/DATABASE.md`.
 

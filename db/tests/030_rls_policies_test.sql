@@ -1,4 +1,4 @@
--- Antero Atendimentos — Entrega 2: as 17 políticas de RLS, testadas por
+-- Antero Atendimentos — Entrega 2: as políticas de RLS (14 desde a E1A), testadas por
 -- COMPORTAMENTO (não basta a política existir).
 --
 -- Cenário: duas organizações (A e B), membros de A em todos os papéis e
@@ -72,7 +72,7 @@ SELECT ok(
                    'public.contacts'::regclass, 'public.conversations'::regclass, 'public.messages'::regclass)),
   'RLS habilitada nas 7 tabelas de negócio'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 17, 'existem exatamente 17 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 14, 'existem exatamente 14 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
@@ -81,11 +81,10 @@ SELECT set_eq(
     ('organizations', 'organizations_update', 'UPDATE'), ('organizations', 'organizations_delete', 'DELETE'),
     ('organization_members', 'organization_members_select', 'SELECT'), ('organization_members', 'organization_members_insert', 'INSERT'),
     ('organization_members', 'organization_members_update', 'UPDATE'), ('organization_members', 'organization_members_delete', 'DELETE'),
-    ('whatsapp_accounts', 'whatsapp_accounts_select', 'SELECT'), ('whatsapp_accounts', 'whatsapp_accounts_insert', 'INSERT'),
-    ('whatsapp_accounts', 'whatsapp_accounts_update', 'UPDATE'), ('whatsapp_accounts', 'whatsapp_accounts_delete', 'DELETE'),
+    ('whatsapp_accounts', 'whatsapp_accounts_select', 'SELECT'),
     ('contacts', 'contacts_select', 'SELECT'), ('conversations', 'conversations_select', 'SELECT'),
     ('messages', 'messages_select', 'SELECT')$$,
-  'as 17 políticas da auditoria, com o comando correto'
+  'as 14 políticas da auditoria, com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -101,9 +100,9 @@ SELECT set_eq(
   $$SELECT table_name::text, privilege_type::text FROM information_schema.role_table_grants
     WHERE grantee = 'antero_app' AND table_schema = 'public'$$,
   $$VALUES ('profiles', 'SELECT'),
-           ('organizations', 'SELECT'), ('organizations', 'INSERT'), ('organizations', 'UPDATE'), ('organizations', 'DELETE'),
+           ('organizations', 'SELECT'), ('organizations', 'INSERT'), ('organizations', 'DELETE'),
            ('organization_members', 'SELECT'), ('organization_members', 'INSERT'), ('organization_members', 'UPDATE'), ('organization_members', 'DELETE'),
-           ('whatsapp_accounts', 'SELECT'), ('whatsapp_accounts', 'INSERT'), ('whatsapp_accounts', 'UPDATE'), ('whatsapp_accounts', 'DELETE'),
+           ('whatsapp_accounts', 'SELECT'),
            ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT')$$,
   'antero_app tem exatamente os privilégios de tabela esperados (sem TRUNCATE/REFERENCES/TRIGGER)'
 );
@@ -209,7 +208,7 @@ SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org
 SELECT is(pg_temp.does('a_att', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$), 0::bigint, 'organizations_update: atendente NÃO altera configurações da organização');
 SELECT is(pg_temp.does('a_disabled', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$), 0::bigint, 'organizations_update: admin desativado NÃO altera');
 SELECT is(pg_temp.does('a_admin', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$), 0::bigint, 'organizations_update: admin de A NÃO altera B');
-SELECT is(pg_temp.does('platform', $q$UPDATE public.organizations SET status = 'inactive' WHERE id = {org_c}$q$), 1::bigint, 'organizations_update: admin da plataforma altera qualquer organização');
+SELECT is(pg_temp.does('platform', $q$UPDATE public.organizations SET name = 'Org C (plataforma)' WHERE id = {org_c}$q$), 1::bigint, 'organizations_update: admin da plataforma altera o nome de qualquer organização');
 
 SELECT is(pg_temp.does('a_owner', 'DELETE FROM public.organizations WHERE id = {org_a}'), 0::bigint, 'organizations_delete: owner NÃO apaga a organização');
 SELECT is(pg_temp.does('b_owner', 'DELETE FROM public.organizations WHERE id = {org_a}'), 0::bigint, 'organizations_delete: dono de outra organização NÃO apaga');
@@ -269,10 +268,11 @@ SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.whatsapp_accounts WHERE id
 SELECT is(pg_temp.sees('a_disabled', 'SELECT 1 FROM public.whatsapp_accounts'), 0::bigint, 'whatsapp_accounts_select: desativado não vê canais');
 SELECT is(pg_temp.sees('platform', 'SELECT 1 FROM public.whatsapp_accounts WHERE organization_id IN ({org_a}, {org_b})'), 2::bigint, 'whatsapp_accounts_select: admin da plataforma vê todos');
 
-SELECT is(
-  pg_temp.does('a_admin', $q$INSERT INTO public.whatsapp_accounts (organization_id, display_name) VALUES ({org_a}, 'Canal A2')$q$),
-  1::bigint, 'whatsapp_accounts_insert: admin cria canal na própria organização'
+SELECT throws_ok(
+  $$SELECT pg_temp.does('a_admin', $q$INSERT INTO public.whatsapp_accounts (organization_id, display_name) VALUES ({org_a}, 'Canal A2')$q$)$$,
+  '42501', NULL, 'whatsapp_accounts: admin NÃO cria canal na própria organização (E1A)'
 );
+INSERT INTO public.whatsapp_accounts (organization_id, display_name) VALUES (pg_temp.id('org_a'), 'Canal A2');
 INSERT INTO ids SELECT 'wa_a2', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A2';
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_att', $q$INSERT INTO public.whatsapp_accounts (organization_id, display_name) VALUES ({org_a}, 'Canal Hack')$q$)$$,
@@ -283,17 +283,17 @@ SELECT throws_ok(
   '42501', NULL, 'whatsapp_accounts_insert: admin de A NÃO forja canal com organization_id de B'
 );
 
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET display_name = 'Canal A (editado)' WHERE id = {wa_a}$q$), 1::bigint, 'whatsapp_accounts_update: owner altera canal da própria organização');
-SELECT is(pg_temp.does('a_att', $q$UPDATE public.whatsapp_accounts SET status = 'disconnected' WHERE id = {wa_a}$q$), 0::bigint, 'whatsapp_accounts_update: atendente NÃO altera canal');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET status = 'disconnected' WHERE id = {wa_b}$q$), 0::bigint, 'whatsapp_accounts_update: owner de A NÃO altera canal de B');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET display_name = 'Canal A (editado)' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'whatsapp_accounts: owner NÃO altera canal da própria organização (E1A)');
+SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.whatsapp_accounts SET status = 'disconnected' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'whatsapp_accounts: atendente NÃO altera canal');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET status = 'disconnected' WHERE id = {wa_b}$q$)$$, '42501', NULL, 'whatsapp_accounts: owner de A NÃO altera canal de B');
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_owner', 'UPDATE public.whatsapp_accounts SET organization_id = {org_b} WHERE id = {wa_a2}')$$,
-  '42501', NULL, 'whatsapp_accounts_update: owner NÃO transfere canal para outra organização (WITH CHECK)'
+  '42501', NULL, 'whatsapp_accounts: owner NÃO transfere canal para outra organização'
 );
 
-SELECT is(pg_temp.does('a_att', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}'), 0::bigint, 'whatsapp_accounts_delete: atendente NÃO remove canal');
-SELECT is(pg_temp.does('b_owner', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}'), 0::bigint, 'whatsapp_accounts_delete: dono de B NÃO remove canal de A');
-SELECT is(pg_temp.does('a_admin', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}'), 1::bigint, 'whatsapp_accounts_delete: admin remove canal da própria organização');
+SELECT throws_ok($$SELECT pg_temp.does('a_att', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}')$$, '42501', NULL, 'whatsapp_accounts: atendente NÃO remove canal');
+SELECT throws_ok($$SELECT pg_temp.does('b_owner', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}')$$, '42501', NULL, 'whatsapp_accounts: dono de B NÃO remove canal de A');
+SELECT throws_ok($$SELECT pg_temp.does('a_admin', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a2}')$$, '42501', NULL, 'whatsapp_accounts: admin NÃO remove canal da própria organização (E1A)');
 
 -- ---------------------------------------------------------------------------
 -- contacts_select / conversations_select / messages_select (somente leitura)

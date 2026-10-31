@@ -50,7 +50,8 @@ Marcado como “Em breve” na interface (não são botões falsos):
 - **Equipe** — lista real de membros (nome, e-mail, papel, status).
 - **Configurações** — dados da organização e do canal de WhatsApp (provedor de
   desenvolvimento), somente leitura no Ciclo 1.
-- **Admin da plataforma** — lista de organizações (apenas `is_platform_admin`).
+- **Admin da plataforma** — lista de organizações, com suspensão e reativação
+  (apenas `is_platform_admin`).
 
 ## Fora do escopo do MVP
 
