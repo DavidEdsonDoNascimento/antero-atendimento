@@ -49,6 +49,40 @@ mostrar um item antigo no menu até recarregar. Clicar nele é negado no servido
 a tela de indisponível atualiza o menu da aba. Um módulo recém-habilitado aparece
 no próximo carregamento completo.
 
+Em carregamento direto, `/contatos` desligado pode responder HTTP 200: `loading.tsx`
+já enviou o shell quando `requireModule` redireciona, e o redirect vai no corpo. A
+resposta não leva dados do módulo. Em teste, confira o destino, não o status.
+
+## RLS e módulos são coisas diferentes
+
+| | RLS (isolamento multiempresa) | Módulos (bloqueio comercial) |
+| --- | --- | --- |
+| Pergunta | Esta linha é da organização do usuário? | A organização contratou este recurso? |
+| Onde vale | No banco, em toda consulta | No backend, em `requireModule` e `withModuleTransaction` |
+| Falha significa | Vazamento entre clientes | Uso de recurso não contratado, dentro da própria organização |
+
+A RLS é a defesa definitiva e não depende da aplicação. O módulo não a substitui nem
+é substituído por ela. Nas tabelas núcleo (`contacts`, `conversations`, `messages`),
+a RLS não consulta módulos: SQL no contexto de um membro ainda leria as linhas da
+própria organização com Atendimento desligado. Quem barra é o backend, então todo
+acesso a essas tabelas passa por `withModuleTransaction`. Nas tabelas novas de um
+módulo, a própria RLS também exige `has_module`.
+
+## Regra para APIs e workers
+
+Vale para todo caminho novo de entrada, sem exceção:
+
+- **Route Handler ou API autenticada:** usa `withModuleTransaction` com a organização
+  ativa da sessão. Nunca aceita organização ou módulo vindos da requisição. Hoje só
+  existem `/api/auth` e `/api/health*`, que não tocam em dados de módulos.
+- **Worker ou webhook, sem sessão de usuário:** `has_module` responde pelo usuário da
+  transação e não serve aqui. Entra por função própria no banco, com a organização
+  derivada do recurso (o canal, por exemplo), conferindo organização ativa e módulo
+  habilitado na mesma transação do trabalho, a cada execução. Não reaproveita
+  resultado guardado de antes.
+- **Módulo desligado no meio do trabalho:** o item seguinte é recusado e não se perde
+  nada. A ingestão continua gravando no núcleo, como em "Dados preservados".
+
 ## Dependências
 
 Campanhas depende de Contatos, por causa de públicos, listas e consentimento.
