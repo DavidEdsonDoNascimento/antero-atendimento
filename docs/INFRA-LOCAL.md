@@ -193,6 +193,8 @@ recriam do zero.
 | `inbox-isolation.test.ts` | empresas A/B, usuário em duas empresas, desativado, sem organização, sem contexto |
 | `inbox-robustness.test.ts` | pool de 1 conexão: cursores/ids inválidos, erro do PostgreSQL, timeout, sem vazamento |
 | `auxiliary-queries.test.ts` | contexto ativo, membros, conta principal de WhatsApp, admin da plataforma |
+| `organization-guard.test.ts` | suspensão: DAL, Inbox, vínculo múltiplo, admin da plataforma, escrita em canais |
+| `organization-modules.test.ts` | módulos: `withModuleTransaction`, Inbox, contexto do DAL, papéis, escrita direta, concorrência |
 | `identity-foundation.test.ts` | Better Auth: schema x opções reais, UUID, pools/papéis separados, perfil automático, cadastro bloqueado, provisionamento |
 | `identity-sessions.test.ts` | login, cookies (ausente, adulterado, outro segredo, expirado), logout, sessões simultâneas, revogação, CSRF, banco indisponível |
 | `identity-password-reset.test.ts` | recuperação com o Mailpit: resposta neutra, link, token expirado/reutilizado, redirecionamentos externos, logs |
@@ -280,7 +282,8 @@ gera novas e encerra as sessões); nada é gravado.
 | `multi` | B (mais antigo) e A | organização ativa determinística (B) |
 | `sem.organizacao` | — | `/sem-organizacao` |
 
-Organização A "Clínica Aurora (fictícia)": 45 conversas (3 páginas), uma com
+As duas organizações recebem o módulo Atendimento (sem sobrescrever configuração
+existente). Organização A "Clínica Aurora (fictícia)": 45 conversas (3 páginas), uma com
 230 mensagens (3 páginas de histórico), uma sem mensagens e uma atribuída ao
 atendente desativado. Organização B "Oficina Boreal (fictícia)": 6 conversas.
 

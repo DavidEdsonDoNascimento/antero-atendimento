@@ -30,9 +30,11 @@ src/
     (auth)/              # login, recuperar-senha, redefinir-senha (formulários → /api/auth)
     api/auth/[...all]/   # handler HTTP do Better Auth
     (platform)/          # área autenticada (sidebar + header)
-      visao-geral/  conversas/  contatos/  fluxos/  equipe/
+      visao-geral/  conversas/  contatos/  fluxos/  campanhas/  equipe/
       configuracoes/
+      modulo-indisponivel/  # módulo não habilitado para a organização ativa
     (platform-admin)/admin/  # admin da plataforma (is_platform_admin), sem exigir organização ativa
+      organizacoes/[organizationId]/  # módulos de uma organização
     sem-organizacao/     # usuário autenticado sem vínculo com organização
     organizacao-suspensa/  # vínculo ativo, mas a organização está suspensa
   components/
@@ -43,8 +45,8 @@ src/
     conversations/       # DAL da Inbox (cursor, paginação, mapeadores)
     organizations/  users/  whatsapp/   # consultas SQL por domínio (sql-queries.ts)
   lib/
-    db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction e
-                         # withOrganizationTransaction
+    db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction,
+                         # withOrganizationTransaction e withModuleTransaction
     auth/                # dal.ts (sessão Better Auth + organização ativa via SQL),
                          # route-access.ts (regras do proxy)
     identity/            # Better Auth sobre o PostgreSQL próprio (ver docs/AUTH.md)
@@ -73,7 +75,9 @@ sugestão do escopo, adaptando nomes de rotas para português (`visao-geral`,
 2. **DAL** (`lib/auth/dal.ts`): verifica sessão e resolve a organização ativa
    perto do dado (organização suspensa não conta). Toda página/ação autenticada
    passa por aqui.
-3. **RLS no Postgres**: a defesa definitiva. Mesmo que a UI falhe, o banco
+3. **Módulos** (`requireModule` + `withModuleTransaction`): o que a organização
+   contratou, conferido a cada requisição. O menu só reflete. Ver `docs/MODULES.md`.
+4. **RLS no Postgres**: a defesa definitiva. Mesmo que a UI falhe, o banco
    impede acesso cruzado entre organizações. Ver `docs/DATABASE.md`.
 
 Regras: segredos só no servidor (nenhuma variável `NEXT_PUBLIC_` é

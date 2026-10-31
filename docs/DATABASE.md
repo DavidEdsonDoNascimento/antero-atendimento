@@ -51,6 +51,11 @@ Canal por organização: `provider` (`development`/`cloud_api`),
 para a aplicação desde a E1A: esses campos decidirão para qual empresa vão os
 webhooks. A conexão real chegará por operação própria e autorizada.
 
+### organization_modules
+Módulos de cada organização: `organization_id`, `module`, `enabled`, `updated_by`,
+`updated_at`, com UNIQUE `(organization_id, module)`. Sem linha significa
+desabilitado. Só leitura para a aplicação; ver "Módulos por organização (E1B)".
+
 ## Tabelas do Ciclo 2 (Etapa 1 — schema fundamental)
 
 ### contacts
@@ -177,8 +182,8 @@ tornar o RLS simples e rápido.
 
 ## Enums
 
-`organization_status`, `member_role`, `member_status`, `whatsapp_provider`,
-`whatsapp_status` (Ciclo 1); `conversation_status`, `message_direction`,
+`organization_status`, `organization_module`, `member_role`, `member_status`,
+`whatsapp_provider`, `whatsapp_status` (Ciclo 1); `conversation_status`, `message_direction`,
 `message_sender`, `message_type`, `message_delivery_status` (Ciclo 2). Enums
 foram escolhidos por trazerem clareza; adicionar novos valores (ex.: outro
 provedor) é feito com `alter type ... add value`.
@@ -199,6 +204,10 @@ totalmente qualificadas.
   próprio usuário tem vínculo ativo (id e nome).
 - `set_organization_status(org_id, status)` — suspende ou reativa; exclusiva do
   admin da plataforma, conferida dentro da função.
+- `has_module(org_id, módulo)` — o usuário da transação pode usar o módulo nessa
+  organização? `SECURITY INVOKER`; exige `is_org_member` e o módulo habilitado.
+- `set_organization_module(org_id, módulo, habilitado)` — altera um módulo; exclusiva
+  do admin da plataforma, com a dependência entre módulos conferida na função.
 
 ## Políticas de RLS (resumo)
 
@@ -208,6 +217,7 @@ totalmente qualificadas.
 | organizations | membro, admin plataforma | admin plataforma | admin da org, admin plataforma (só `name`) | admin plataforma |
 | organization_members | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
 | whatsapp_accounts | membro, admin plataforma | — | — | — |
+| organization_modules | membro, admin plataforma | — | — | — |
 | contacts | membro ativo da org | — | — | — |
 | conversations | membro ativo da org | — | — | — |
 | messages | membro ativo da org | — | — | — |
@@ -261,6 +271,27 @@ conversas e 400 mil mensagens: lista da Inbox de ~113 ms para ~165 ms, filtro
 `(organization_id, last_message_at DESC, id DESC)` leva a lista a ~0,3 ms, mas não
 ajuda o filtro `open`; não foi criado, porque a escala atual não exige.
 
+## Módulos por organização (E1B)
+
+Migration `0007_organization_modules`. Funcionamento, dependências e como adicionar
+módulos: `docs/MODULES.md`. Pontos de banco:
+
+- Atendimento foi habilitado na migration para as organizações existentes, com
+  `updated_by` nulo; organização criada depois nasce sem módulos.
+- `set_organization_module` é a única porta de escrita: `SECURITY DEFINER`, dono
+  `antero_owner`, `search_path` vazio, sem EXECUTE para PUBLIC. Nem o admin da
+  plataforma escreve por UPDATE direto. Erros: 42501 (não autorizado), 23514
+  (dependência), P0002 (organização inexistente), 22004 (entrada nula).
+- A função trava a linha da organização (`FOR NO KEY UPDATE`): sem isso, habilitar
+  Campanhas e desabilitar Contatos em paralelo deixa Campanhas sem Contatos, como o
+  teste de concorrência demonstra.
+- `contacts`, `conversations` e `messages` não têm `has_module` nas políticas; a
+  guarda da Inbox é `withModuleTransaction`, uma vez por transação. Por isso uma
+  consulta SQL sob o contexto do membro ainda lê essas tabelas: o bloqueio de
+  Atendimento é da aplicação, não da RLS. Tabelas novas de um módulo usam
+  `has_module` na política.
+- O rollback da 0007 recusa-se se alguma configuração foi alterada.
+
 ## Administrador da plataforma vs. proprietário
 
 `is_platform_admin` (em `profiles`) é o administrador **global da Antero**,
@@ -291,6 +322,7 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0004_atendimento_rls` | as 3 políticas de leitura do Ciclo 2 | 0003 |
 | `0005_ingest_inbound_message` | função de ingestão | 0001, 0003 |
 | `0006_organization_guard` | suspensão efetiva, `set_organization_status`, restrição de escrita em `organizations` e `whatsapp_accounts` | 0001–0005 |
+| `0007_organization_modules` | enum e tabela de módulos, `has_module`, `set_organization_module`, Atendimento nas organizações existentes | 0006 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -448,6 +480,10 @@ navegador. As consultas mantêm a RLS e ainda filtram `organization_id`
 explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
 (testado).
 
+`withModuleTransaction(context, módulo, callback)` acrescenta, na mesma transação,
+`public.has_module`: com vínculo e módulo desligado → `ModuleDisabledError` (subclasse
+de `AccessDeniedError`). As consultas da Inbox rodam nela, com o módulo Atendimento.
+
 ### Funções disponíveis
 
 | Módulo (`sql-queries.ts`) | Função | Uso |
@@ -459,6 +495,9 @@ explicitamente: um usuário com vínculo em duas empresas vê só a do contexto
 | `organizations` | `listAllOrganizations({ userId })` | `/admin` (confere o papel no banco) |
 | `organizations` | `setOrganizationStatus({ userId, organizationId, status })` | suspender/reativar em `/admin` |
 | `organizations` | `getSuspendedOrganizations({ userId })` | `/organizacao-suspensa` |
+| `organizations` | `listEnabledModules({ userId })` | módulos na listagem de `/admin` |
+| `organizations` | `getOrganizationModuleConfiguration({ userId, organizationId })` | `/admin/organizacoes/[id]` |
+| `organizations` | `setOrganizationModule({ userId, organizationId, module, enabled })` | habilitar/desabilitar em `/admin` |
 | `users` | `listOrganizationMembers(ctx)` | Equipe |
 | `users` | `getOwnProfile({ userId })` | perfil do próprio usuário (DAL) |
 | `whatsapp` | `getPrimaryWhatsappAccount(ctx)` | Configurações |
