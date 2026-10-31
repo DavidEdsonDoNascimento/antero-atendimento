@@ -96,7 +96,8 @@ só em `127.0.0.1`. O Next.js carrega apenas `.env.local`
 
 Páginas para começar: `/login` → `/visao-geral` → `/conversas` (filtros,
 "Carregar mais", histórico) → `/equipe` → `/configuracoes` → `/admin`
-(só administrador da plataforma). A Inbox é somente leitura.
+(só administrador da plataforma). A Inbox é somente leitura. Organização nova nasce
+sem módulos: habilite-os em `/admin` (`docs/MODULES.md`).
 
 E-mails (recuperação de senha) chegam ao Mailpit: http://127.0.0.1:55426.
 

@@ -55,6 +55,9 @@ export async function createInboxFixtures(fixture: pg.Client): Promise<InboxFixt
     "Org C Vazia",
     `org-c-${f.suffix}`,
   ]);
+  await fixture.query("INSERT INTO public.organization_modules (organization_id, module, enabled) VALUES ($1, 'atendimento', true)", [
+    orgC,
+  ]);
   await fixture.query(
     `INSERT INTO public.organization_members (organization_id, user_id, role, status, created_at) VALUES
        ($1, $4, 'attendant', 'active', '2026-02-01 00:00:00+00'),

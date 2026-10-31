@@ -3,11 +3,19 @@
 import { useState } from "react";
 
 import { Logo } from "@/components/ui/logo";
+import type { OrganizationModule } from "@/lib/types/database";
+import { filterByModules } from "@/modules/organizations/modules";
 
 import { adminNav, mainNav } from "./nav-config";
 import { NavLink } from "./nav-link";
 
-export function MobileNav({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
+export function MobileNav({
+  isPlatformAdmin,
+  modules,
+}: {
+  isPlatformAdmin: boolean;
+  modules: OrganizationModule[];
+}) {
   const [open, setOpen] = useState(false);
   const close = () => setOpen(false);
 
@@ -64,7 +72,7 @@ export function MobileNav({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
               </button>
             </div>
             <nav className="space-y-1">
-              {mainNav.map((item) => (
+              {filterByModules(mainNav, modules).map((item) => (
                 <NavLink
                   key={item.href}
                   href={item.href}

@@ -39,7 +39,7 @@ Concluído:
 
 Marcado como “Em breve” na interface (não são botões falsos):
 
-- Conversas, Contatos (Ciclo 2) · Fluxos (Ciclo 3)
+- Contatos, Automações e Campanhas: módulos habilitáveis, ainda em desenvolvimento
 - Edição de organização e convite de usuários por e-mail (ciclos futuros)
 
 ## Telas
@@ -50,13 +50,13 @@ Marcado como “Em breve” na interface (não são botões falsos):
 - **Equipe** — lista real de membros (nome, e-mail, papel, status).
 - **Configurações** — dados da organização e do canal de WhatsApp (provedor de
   desenvolvimento), somente leitura no Ciclo 1.
-- **Admin da plataforma** — lista de organizações, com suspensão e reativação
-  (apenas `is_platform_admin`).
+- **Admin da plataforma** — lista de organizações, com suspensão, reativação e
+  configuração de módulos (apenas `is_platform_admin`). Ver `docs/MODULES.md`.
 
 ## Fora do escopo do MVP
 
-Pagamentos/assinaturas, IA generativa, CRM completo, campanhas/disparos em
-massa, app mobile, microsserviços, construtor visual avançado de fluxos.
+Pagamentos/assinaturas, IA generativa, CRM completo, app mobile, microsserviços, construtor visual avançado de fluxos.
+Campanhas e automações já são módulos habilitáveis, mas ainda sem funcionalidade.
 Também: não alterar o site institucional, não reutilizar o banco do site, não
 colocar tokens no código, não usar dados fixos da Antero nos componentes.
 

@@ -69,10 +69,11 @@ SELECT ok(
   (SELECT bool_and(c.relrowsecurity) FROM pg_class c
    WHERE c.oid IN ('public.profiles'::regclass, 'public.organizations'::regclass,
                    'public.organization_members'::regclass, 'public.whatsapp_accounts'::regclass,
-                   'public.contacts'::regclass, 'public.conversations'::regclass, 'public.messages'::regclass)),
-  'RLS habilitada nas 7 tabelas de negócio'
+                   'public.contacts'::regclass, 'public.conversations'::regclass, 'public.messages'::regclass,
+                   'public.organization_modules'::regclass)),
+  'RLS habilitada nas 8 tabelas de negócio'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 14, 'existem exatamente 14 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 15, 'existem exatamente 15 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
@@ -83,8 +84,9 @@ SELECT set_eq(
     ('organization_members', 'organization_members_update', 'UPDATE'), ('organization_members', 'organization_members_delete', 'DELETE'),
     ('whatsapp_accounts', 'whatsapp_accounts_select', 'SELECT'),
     ('contacts', 'contacts_select', 'SELECT'), ('conversations', 'conversations_select', 'SELECT'),
-    ('messages', 'messages_select', 'SELECT')$$,
-  'as 14 políticas da auditoria, com o comando correto'
+    ('messages', 'messages_select', 'SELECT'),
+    ('organization_modules', 'organization_modules_select', 'SELECT')$$,
+  'as 15 políticas da auditoria, com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -103,7 +105,8 @@ SELECT set_eq(
            ('organizations', 'SELECT'), ('organizations', 'INSERT'), ('organizations', 'DELETE'),
            ('organization_members', 'SELECT'), ('organization_members', 'INSERT'), ('organization_members', 'UPDATE'), ('organization_members', 'DELETE'),
            ('whatsapp_accounts', 'SELECT'),
-           ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT')$$,
+           ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT'),
+           ('organization_modules', 'SELECT')$$,
   'antero_app tem exatamente os privilégios de tabela esperados (sem TRUNCATE/REFERENCES/TRIGGER)'
 );
 SELECT set_eq(

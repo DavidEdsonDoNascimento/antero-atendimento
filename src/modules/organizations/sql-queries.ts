@@ -2,7 +2,17 @@ import "server-only";
 
 import { AccessDeniedError, sqlStateOf, withUserTransaction } from "@/lib/db";
 import type { ActiveContext } from "@/lib/auth/dal";
-import type { MemberRole, Organization, OrganizationStatus, Profile } from "@/lib/types/database";
+import type {
+  MemberRole,
+  Organization,
+  OrganizationModule,
+  OrganizationStatus,
+  Profile,
+} from "@/lib/types/database";
+
+// Extensão .ts explícita nas importações de VALOR (ver nota em
+// modules/conversations/cursor.ts).
+import { ModuleDependencyError, OrganizationNotFoundError } from "./errors.ts";
 
 /**
  * Consultas de organização sobre o PostgreSQL próprio (Entrega 4; usadas
@@ -70,6 +80,108 @@ export async function setOrganizationStatus(context: {
   }
 }
 
+export type EnabledModuleRow = { organization_id: string; module: OrganizationModule };
+
+/**
+ * Módulos habilitados de todas as organizações (listagem de `/admin`) — só
+ * administrador da plataforma, conferido no banco como em `listAllOrganizations`.
+ */
+export async function listEnabledModules(context: { userId: string }): Promise<EnabledModuleRow[]> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<{ allowed: boolean }>("SELECT public.is_platform_admin() AS allowed");
+      if (rows[0]?.allowed !== true) throw new AccessDeniedError();
+      return (
+        await tx.query<EnabledModuleRow>(
+          `SELECT m.organization_id, m.module
+           FROM public.organization_modules m
+           WHERE m.enabled
+           ORDER BY m.organization_id, m.module`,
+        )
+      ).rows;
+    });
+  } catch (error) {
+    throw queryFailure("Falha ao carregar os módulos", error);
+  }
+}
+
+export type OrganizationModuleSetting = {
+  module: OrganizationModule;
+  enabled: boolean;
+  updated_at: string;
+  updated_by_name: string | null;
+};
+
+export type OrganizationModuleConfiguration = {
+  organization: Organization;
+  /** Só os módulos com linha gravada; sem linha significa desabilitado. */
+  settings: OrganizationModuleSetting[];
+};
+
+/**
+ * Configuração de módulos de uma organização (`/admin/organizacoes/[id]`) — só
+ * administrador da plataforma, sem exigir vínculo. `null` se ela não existe.
+ */
+export async function getOrganizationModuleConfiguration(context: {
+  userId: string;
+  organizationId: string;
+}): Promise<OrganizationModuleConfiguration | null> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<{ allowed: boolean }>("SELECT public.is_platform_admin() AS allowed");
+      if (rows[0]?.allowed !== true) throw new AccessDeniedError();
+      const organization = (
+        await tx.query<Organization>(
+          `SELECT ${ORGANIZATION_COLUMNS} FROM public.organizations o WHERE o.id = $1::uuid`,
+          [context.organizationId],
+        )
+      ).rows[0];
+      if (!organization) return null;
+      const settings = (
+        await tx.query<OrganizationModuleSetting>(
+          `SELECT m.module, m.enabled, m.updated_at, p.full_name AS updated_by_name
+           FROM public.organization_modules m
+           LEFT JOIN public.profiles p ON p.id = m.updated_by
+           WHERE m.organization_id = $1::uuid
+           ORDER BY m.module`,
+          [context.organizationId],
+        )
+      ).rows;
+      return { organization, settings };
+    });
+  } catch (error) {
+    throw queryFailure("Falha ao carregar a configuração de módulos", error);
+  }
+}
+
+/**
+ * Habilita ou desabilita um módulo — só administrador da plataforma. A
+ * autorização e a dependência entre módulos são de
+ * `public.set_organization_module` (0007), conferidas na transação.
+ */
+export async function setOrganizationModule(context: {
+  userId: string;
+  organizationId: string;
+  module: OrganizationModule;
+  enabled: boolean;
+}): Promise<boolean> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<{ enabled: boolean }>(
+        "SELECT public.set_organization_module($1::uuid, $2::public.organization_module, $3::boolean) AS enabled",
+        [context.organizationId, context.module, context.enabled],
+      );
+      return rows[0].enabled;
+    });
+  } catch (error) {
+    const sqlState = sqlStateOf(error);
+    if (sqlState === "42501") throw new AccessDeniedError();
+    if (sqlState === "23514") throw new ModuleDependencyError();
+    if (sqlState === "P0002") throw new OrganizationNotFoundError();
+    throw queryFailure("Falha ao alterar o módulo da organização", error);
+  }
+}
+
 export type SuspendedOrganization = { id: string; name: string };
 
 /**
@@ -94,7 +206,7 @@ export async function getSuspendedOrganizations(context: { userId: string }): Pr
 type ActiveMembershipRow = Organization & { role: MemberRole };
 
 /**
- * Contexto ativo do usuário (perfil + organização + papel): a associação
+ * Contexto ativo do usuário (perfil + organização + papel + módulos habilitados): a associação
  * ATIVA mais antiga (`created_at`, desempate por `id`) em organização ATIVA;
  * `null` sem perfil ou sem associação assim. O filtro de status é explícito
  * porque a RLS deixa o administrador da plataforma ler organizações e vínculos
@@ -126,7 +238,16 @@ export async function getActiveContext(context: { userId: string }): Promise<Act
       if (!profile || !membership) return null;
 
       const { role, ...organization } = membership;
-      return { userId, profile, organization, role };
+      const modules = (
+        await tx.query<{ module: OrganizationModule }>(
+          `SELECT m.module
+           FROM public.organization_modules m
+           WHERE m.organization_id = $1::uuid AND m.enabled
+           ORDER BY m.module`,
+          [organization.id],
+        )
+      ).rows.map((row) => row.module);
+      return { userId, profile, organization, role, modules };
     });
   } catch (error) {
     throw queryFailure("Falha ao carregar o contexto ativo", error);

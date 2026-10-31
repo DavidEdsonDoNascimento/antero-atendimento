@@ -189,6 +189,11 @@ export async function createFixtures(fixture: pg.Client): Promise<Fixtures> {
     "Org B Integração",
     `org-b-${suffix}`,
   ]);
+  // Organização nova nasce sem módulos; estas usam a Inbox.
+  await fixture.query(
+    "INSERT INTO public.organization_modules (organization_id, module, enabled) VALUES ($1, 'atendimento', true), ($2, 'atendimento', true)",
+    [orgA, orgB],
+  );
   await fixture.query(
     `INSERT INTO public.organization_members (organization_id, user_id, role, status) VALUES
        ($1, $3, 'owner', 'active'), ($1, $4, 'attendant', 'active'), ($1, $5, 'admin', 'disabled'),

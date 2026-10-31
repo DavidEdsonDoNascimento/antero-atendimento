@@ -7,18 +7,19 @@ export default async function PlatformLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { organization, profile } = await requireActiveContext();
+  const { organization, profile, modules } = await requireActiveContext();
   const isPlatformAdmin = profile.is_platform_admin;
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar isPlatformAdmin={isPlatformAdmin} />
+      <Sidebar isPlatformAdmin={isPlatformAdmin} modules={modules} />
       <div className="flex min-w-0 flex-1 flex-col">
         <Header
           organization={organization}
           fullName={profile.full_name ?? ""}
           email={profile.email}
           isPlatformAdmin={isPlatformAdmin}
+          modules={modules}
         />
         <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 md:px-6 md:py-8">
           {children}
