@@ -46,14 +46,14 @@ const applied = async () => (await admin.query("select version from public.schem
 
 test("up é idempotente: segunda execução não reaplica nada e sai com 0", async () => {
   const before = await applied();
-  assert.deepEqual(before, ["0000", "0001", "0002", "0003", "0004", "0005", "0006"]);
+  assert.deepEqual(before, ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007"]);
   const again = dbmate("up");
   assert.equal(again.status, 0, again.out);
   assert.doesNotMatch(again.out, /Applying|Applied/);
   assert.deepEqual(await applied(), before);
   const status = dbmate("status");
   assert.equal(status.status, 0);
-  assert.match(status.out, /Applied: 7/);
+  assert.match(status.out, /Applied: 8/);
   assert.match(status.out, /Pending: 0/);
 });
 
