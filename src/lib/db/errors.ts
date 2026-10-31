@@ -63,6 +63,18 @@ export class AccessDeniedError extends Error {
 }
 
 /**
+ * O usuário opera a organização, mas o módulo pedido não está habilitado. É um
+ * `AccessDeniedError`: quem só trata acesso negado continua falhando fechado.
+ */
+export class ModuleDisabledError extends AccessDeniedError {
+  constructor() {
+    super();
+    this.name = "ModuleDisabledError";
+    this.message = "O módulo solicitado não está habilitado para esta organização.";
+  }
+}
+
+/**
  * SQLSTATE de um erro vindo do PostgreSQL (`DatabaseError` do `pg`), ou
  * `undefined` para qualquer outro erro. Checagem estrutural, para os módulos
  * de domínio tratarem erros do banco sem importar `pg`.

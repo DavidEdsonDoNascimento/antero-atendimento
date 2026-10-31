@@ -273,6 +273,12 @@ try {
       "INSERT INTO public.organizations (id, name, slug, status, created_at) VALUES ($1, $2, $3, 'active', '2026-09-30 12:00:00+00') ON CONFLICT (id) DO NOTHING",
       [org.id, org.name, org.slug],
     );
+    // Organização nova nasce sem módulos; estas usam a Inbox. Não sobrescreve o
+    // que o admin da plataforma tiver configurado.
+    await client.query(
+      "INSERT INTO public.organization_modules (organization_id, module, enabled) VALUES ($1, 'atendimento', true) ON CONFLICT (organization_id, module) DO NOTHING",
+      [org.id],
+    );
   }
   for (const account of Object.values(ACCOUNTS)) {
     await client.query(

@@ -15,7 +15,7 @@ import type {
  * primeira página do filtro atual. O cursor é opaco para esta camada —
  * nunca é decodificado aqui, só repassado para a DAL.
  *
- * `context` vem do DAL (`organizationContextOf(await requireActiveContext())`):
+ * `context` vem do DAL (`organizationContextOf(await requireModule("atendimento"))`):
  * usuário da sessão validada + organização ativa — nunca da URL.
  */
 export async function loadConversationList(

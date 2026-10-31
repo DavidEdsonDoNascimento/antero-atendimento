@@ -9,7 +9,11 @@ import "server-only";
  * sessão validada pelo DAL (`lib/auth/dal.ts`, Entrega 5B).
  */
 export { withUserTransaction } from "./transaction.ts";
-export { withOrganizationTransaction, type OrganizationContext } from "./organization.ts";
+export {
+  withModuleTransaction,
+  withOrganizationTransaction,
+  type OrganizationContext,
+} from "./organization.ts";
 export { closeAppPool } from "./pool.ts";
 export { pingAppDatabase } from "./health.ts";
 export {
@@ -17,6 +21,7 @@ export {
   DatabaseConfigError,
   DisallowedQueryError,
   InvalidUserContextError,
+  ModuleDisabledError,
   TransactionClosedError,
   sqlStateOf,
 } from "./errors.ts";

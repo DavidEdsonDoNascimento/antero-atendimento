@@ -2,19 +2,19 @@ import type { Metadata } from "next";
 
 import { ComingSoon } from "@/components/ui/coming-soon";
 import { IconContacts } from "@/components/ui/icons";
-import { requireActiveContext } from "@/lib/auth/dal";
+import { requireModule } from "@/lib/auth/dal";
 
 export const metadata: Metadata = { title: "Contatos" };
 
 export default async function ContatosPage() {
-  await requireActiveContext();
+  await requireModule("contatos");
   return (
     <ComingSoon
       title="Contatos"
-      description="Pessoas que entraram em contato com a organização."
-      cycle="Ciclo 2"
+      description="Gestão, importação e listas de contatos da organização."
+      cycle="recurso em desenvolvimento"
       icon={<IconContacts className="size-6" />}
-      detail="A listagem de contatos, informações básicas e histórico de conversas serão implementados no Ciclo 2 — Atendimento simulado."
+      detail="A gestão, a importação e as listas de contatos ainda não estão disponíveis."
     />
   );
 }

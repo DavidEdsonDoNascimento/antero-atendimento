@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
-import { organizationContextOf, requireActiveContext } from "@/lib/auth/dal";
+import { organizationContextOf, requireModule } from "@/lib/auth/dal";
 import { getConversationDetail } from "@/modules/conversations/sql-queries";
 import { parseConversationStatusFilter, parseCursorParam } from "@/modules/conversations/search-params";
 
@@ -24,7 +24,7 @@ export default async function ConversaDetalhePage({
   params,
   searchParams,
 }: ConversaDetalhePageProps) {
-  const context = organizationContextOf(await requireActiveContext());
+  const context = organizationContextOf(await requireModule("atendimento"));
   const { conversationId } = await params;
   const sp = await searchParams;
   const status = parseConversationStatusFilter(sp.status);

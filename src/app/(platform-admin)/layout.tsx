@@ -19,7 +19,7 @@ export default async function PlatformAdminLayout({
 
   return (
     <div className="flex min-h-screen">
-      {context && <Sidebar isPlatformAdmin />}
+      {context && <Sidebar isPlatformAdmin modules={context.modules} />}
       <div className="flex min-w-0 flex-1 flex-col">
         {context ? (
           <Header
@@ -27,6 +27,7 @@ export default async function PlatformAdminLayout({
             fullName={profile.full_name ?? ""}
             email={profile.email}
             isPlatformAdmin
+            modules={context.modules}
           />
         ) : (
           <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 md:px-6">

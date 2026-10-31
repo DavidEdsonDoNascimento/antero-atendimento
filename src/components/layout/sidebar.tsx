@@ -1,16 +1,24 @@
 import { Logo } from "@/components/ui/logo";
+import type { OrganizationModule } from "@/lib/types/database";
+import { filterByModules } from "@/modules/organizations/modules";
 
 import { adminNav, mainNav } from "./nav-config";
 import { NavLink } from "./nav-link";
 
-export function Sidebar({ isPlatformAdmin }: { isPlatformAdmin: boolean }) {
+export function Sidebar({
+  isPlatformAdmin,
+  modules,
+}: {
+  isPlatformAdmin: boolean;
+  modules: OrganizationModule[];
+}) {
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-line bg-surface/30 md:flex">
       <div className="flex h-16 items-center border-b border-line px-5">
         <Logo />
       </div>
       <nav className="flex-1 space-y-1 overflow-y-auto p-3">
-        {mainNav.map((item) => (
+        {filterByModules(mainNav, modules).map((item) => (
           <NavLink
             key={item.href}
             href={item.href}

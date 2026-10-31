@@ -15,7 +15,7 @@ import type { ConversationStatusFilter } from "./types";
 // Lógica pura (texto SQL + montagem de linhas, sem I/O, sem segredo) — sem
 // `import "server-only"` de propósito, mesma convenção de `cursor.ts` e
 // `mappers.ts`: testável com `node --test`. Quem executa é
-// `sql-queries.ts` (server-only), dentro de `withOrganizationTransaction`.
+// `sql-queries.ts` (server-only), dentro de `withModuleTransaction`.
 
 /**
  * SQL das leituras de conversas para o PostgreSQL próprio (Entrega 4),

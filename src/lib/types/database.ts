@@ -7,6 +7,7 @@
  */
 
 export type OrganizationStatus = "active" | "inactive";
+export type OrganizationModule = "atendimento" | "automacoes" | "campanhas" | "contatos";
 export type MemberRole = "owner" | "admin" | "attendant";
 export type MemberStatus = "active" | "invited" | "disabled";
 export type WhatsappProvider = "development" | "cloud_api";

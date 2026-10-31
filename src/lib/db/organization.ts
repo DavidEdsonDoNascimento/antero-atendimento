@@ -4,9 +4,10 @@ import { z } from "zod";
 
 // Extensão .ts explícita nas importações de VALOR (ver nota em
 // modules/conversations/cursor.ts).
-import { AccessDeniedError } from "./errors.ts";
+import { AccessDeniedError, ModuleDisabledError } from "./errors.ts";
 import { withUserTransaction } from "./transaction.ts";
 import type { DbTransaction } from "./types";
+import type { OrganizationModule } from "../types/database";
 
 /**
  * Identidade + organização de uma requisição. Os dois valores precisam vir
@@ -46,6 +47,28 @@ export async function withOrganizationTransaction<T>(
       [organizationId],
     );
     if (rows[0]?.allowed !== true) throw new AccessDeniedError();
+    return callback(tx);
+  });
+}
+
+/**
+ * `withOrganizationTransaction` + confirmação, na mesma transação e pela mesma
+ * função das políticas (`public.has_module`), de que o módulo está habilitado.
+ * A decisão vale para o estado do banco neste instante, não para o que foi lido
+ * antes da ação. Sem vínculo → `AccessDeniedError`; com vínculo, módulo
+ * desabilitado → `ModuleDisabledError`, ambos antes de o callback rodar.
+ */
+export async function withModuleTransaction<T>(
+  context: OrganizationContext,
+  module: OrganizationModule,
+  callback: (tx: DbTransaction) => Promise<T>,
+): Promise<T> {
+  return withOrganizationTransaction(context, async (tx) => {
+    const { rows } = await tx.query<{ allowed: boolean }>(
+      "SELECT public.has_module($1::uuid, $2::public.organization_module) AS allowed",
+      [context.organizationId, module],
+    );
+    if (rows[0]?.allowed !== true) throw new ModuleDisabledError();
     return callback(tx);
   });
 }

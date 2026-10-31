@@ -41,6 +41,9 @@ before(async () => {
       `org-volume-${f.suffix}`,
     ])
   ).rows[0].id;
+  await fixture.query("INSERT INTO public.organization_modules (organization_id, module, enabled) VALUES ($1, 'atendimento', true)", [
+    orgVolume,
+  ]);
   await fixture.query(
     "INSERT INTO public.organization_members (organization_id, user_id, role, status) VALUES ($1, $2, 'owner', 'active')",
     [orgVolume, f.more.multi],

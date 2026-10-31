@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import {
   sqlStateOf,
-  withOrganizationTransaction,
+  withModuleTransaction,
   type DbTransaction,
   type OrganizationContext,
 } from "@/lib/db";
@@ -49,9 +49,10 @@ import type {
  *
  * O `OrganizationContext` precisa vir do servidor (sessão validada +
  * organização ativa do usuário) — nunca do navegador. Cada chamada roda em
- * `withOrganizationTransaction`: contexto de RLS do usuário, vínculo ativo
- * com a organização confirmado (senão `AccessDeniedError`) e filtro
- * explícito por `organization_id` em todas as consultas.
+ * `withModuleTransaction` (módulo Atendimento): contexto de RLS do usuário,
+ * vínculo ativo com a organização confirmado (senão `AccessDeniedError`), módulo
+ * habilitado (senão `ModuleDisabledError`) e filtro explícito por
+ * `organization_id` em todas as consultas.
  *
  * Erros: os mesmos de `queries.ts` — `InvalidCursorError` para cursor
  * inválido e `ConversationQueryError` para falha do banco (com o
@@ -77,7 +78,7 @@ async function runRead<T>(
   work: (tx: DbTransaction) => Promise<T>,
 ): Promise<T> {
   try {
-    return await withOrganizationTransaction(context, work);
+    return await withModuleTransaction(context, "atendimento", work);
   } catch (error) {
     const sqlState = sqlStateOf(error);
     if (sqlState === undefined) throw error;

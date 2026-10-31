@@ -7,7 +7,7 @@ import { redirect } from "next/navigation";
 import type { OrganizationContext } from "@/lib/db";
 import { IdentityUnavailableError } from "@/lib/identity/errors";
 import { getValidatedSession } from "@/lib/identity/session";
-import type { MemberRole, Organization, Profile } from "@/lib/types/database";
+import type { MemberRole, Organization, OrganizationModule, Profile } from "@/lib/types/database";
 import {
   getActiveContext as loadActiveContext,
   getSuspendedOrganizations as loadSuspendedOrganizations,
@@ -53,6 +53,8 @@ export type ActiveContext = {
   profile: Profile;
   organization: Organization;
   role: MemberRole;
+  /** Módulos habilitados da organização ativa, lidos a cada requisição. */
+  modules: OrganizationModule[];
 };
 
 /**
@@ -81,6 +83,18 @@ export const requireActiveContext = cache(async (): Promise<ActiveContext> => {
     const suspended = await getSuspendedOrganizations();
     redirect(suspended.length > 0 ? "/organizacao-suspensa" : "/sem-organizacao");
   }
+  return context;
+});
+
+/**
+ * Contexto ativo com o módulo habilitado; senão, leva à tela de módulo
+ * indisponível. O layout não roda de novo na navegação pelo cliente: toda página
+ * e ação de um módulo chama esta função. Operações com dados ainda confirmam na
+ * transação (`withModuleTransaction`).
+ */
+export const requireModule = cache(async (module: OrganizationModule): Promise<ActiveContext> => {
+  const context = await requireActiveContext();
+  if (!context.modules.includes(module)) redirect(`/modulo-indisponivel?modulo=${module}`);
   return context;
 });
 

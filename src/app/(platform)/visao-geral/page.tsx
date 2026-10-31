@@ -11,6 +11,7 @@ import {
   roleLabel,
   roleTone,
 } from "@/lib/labels";
+import { MODULE_CATALOG, ORGANIZATION_MODULES } from "@/modules/organizations/modules";
 
 export const metadata: Metadata = { title: "Visão geral" };
 
@@ -31,7 +32,7 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default async function VisaoGeralPage() {
-  const { organization, role, profile } = await requireActiveContext();
+  const { organization, role, profile, modules } = await requireActiveContext();
   const firstName = (profile.full_name ?? "").split(" ")[0];
 
   return (
@@ -45,16 +46,18 @@ export default async function VisaoGeralPage() {
         }
       />
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {metrics.map((metric) => (
-          <StatTile
-            key={metric.label}
-            label={metric.label}
-            value="—"
-            hint="Disponível no Ciclo 2"
-          />
-        ))}
-      </div>
+      {modules.includes("atendimento") && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {metrics.map((metric) => (
+            <StatTile
+              key={metric.label}
+              label={metric.label}
+              value="—"
+              hint="Disponível no Ciclo 2"
+            />
+          ))}
+        </div>
+      )}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
@@ -81,36 +84,22 @@ export default async function VisaoGeralPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Próximos passos</CardTitle>
+            <CardTitle>Módulos da organização</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm text-muted">
-            <p>
-              A fundação da plataforma está pronta (autenticação, organizações,
-              equipe e segurança).
-            </p>
-            <ul className="space-y-2">
-              <li className="flex gap-2">
-                <span className="text-gold">•</span>
-                <span>
-                  <span className="text-foreground">Ciclo 2:</span> caixa de
-                  entrada, contatos, mensagens e atendimento simulado.
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-gold">•</span>
-                <span>
-                  <span className="text-foreground">Ciclo 3:</span> motor de
-                  automação com níveis e subníveis.
-                </span>
-              </li>
-              <li className="flex gap-2">
-                <span className="text-gold">•</span>
-                <span>
-                  <span className="text-foreground">Ciclo 4:</span> preparação
-                  para o WhatsApp Cloud API real.
-                </span>
-              </li>
-            </ul>
+          <CardContent className="divide-y divide-line py-1">
+            {ORGANIZATION_MODULES.map((module) => (
+              <InfoRow
+                key={module}
+                label={MODULE_CATALOG[module].label}
+                value={
+                  modules.includes(module) ? (
+                    <Badge tone="green">Habilitado</Badge>
+                  ) : (
+                    <Badge tone="zinc">Não contratado</Badge>
+                  )
+                }
+              />
+            ))}
           </CardContent>
         </Card>
       </div>
