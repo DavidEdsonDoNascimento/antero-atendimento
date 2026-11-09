@@ -70,10 +70,10 @@ SELECT ok(
    WHERE c.oid IN ('public.profiles'::regclass, 'public.organizations'::regclass,
                    'public.organization_members'::regclass, 'public.whatsapp_accounts'::regclass,
                    'public.contacts'::regclass, 'public.conversations'::regclass, 'public.messages'::regclass,
-                   'public.organization_modules'::regclass)),
-  'RLS habilitada nas 8 tabelas de negócio'
+                   'public.organization_modules'::regclass, 'public.conversation_events'::regclass)),
+  'RLS habilitada nas 9 tabelas de negócio'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 15, 'existem exatamente 15 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 16, 'existem exatamente 16 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
@@ -85,8 +85,9 @@ SELECT set_eq(
     ('whatsapp_accounts', 'whatsapp_accounts_select', 'SELECT'),
     ('contacts', 'contacts_select', 'SELECT'), ('conversations', 'conversations_select', 'SELECT'),
     ('messages', 'messages_select', 'SELECT'),
-    ('organization_modules', 'organization_modules_select', 'SELECT')$$,
-  'as 15 políticas da auditoria, com o comando correto'
+    ('organization_modules', 'organization_modules_select', 'SELECT'),
+    ('conversation_events', 'conversation_events_select', 'SELECT')$$,
+  'as 16 políticas da auditoria, com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -106,7 +107,7 @@ SELECT set_eq(
            ('organization_members', 'SELECT'), ('organization_members', 'INSERT'), ('organization_members', 'UPDATE'), ('organization_members', 'DELETE'),
            ('whatsapp_accounts', 'SELECT'),
            ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT'),
-           ('organization_modules', 'SELECT')$$,
+           ('organization_modules', 'SELECT'), ('conversation_events', 'SELECT')$$,
   'antero_app tem exatamente os privilégios de tabela esperados (sem TRUNCATE/REFERENCES/TRIGGER)'
 );
 SELECT set_eq(

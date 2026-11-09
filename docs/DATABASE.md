@@ -394,6 +394,16 @@ Não foi alterada (Supabase remoto fora do escopo). Recomenda-se aplicar lá a
 mesma restrição de coluna (`revoke update … ; grant update (full_name) …`) ou
 concluir a migração antes de expor o produto a usuários não confiáveis.
 
+### Atendimento humano (0008, E2A)
+
+`antero_app` continua sem INSERT/UPDATE/DELETE em `conversations` e `messages`.
+Assumir, responder e resolver são funções SECURITY DEFINER
+(`claim_conversation`, `send_conversation_reply`, `record_outbound_result`,
+`resolve_conversation`) que recebem a organização ativa **e** a conversa, exigem
+`has_module(org, 'atendimento')` e travam a conversa antes de decidir.
+`conversation_events` (só SELECT para a aplicação, RLS com `has_module`) é
+preenchida por gatilho. Regras, SQLSTATEs e o simulador: `docs/ATENDIMENTO.md`.
+
 ### Entrada de sistema (webhook/worker) — desenho futuro
 
 `ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo
@@ -491,6 +501,9 @@ de `AccessDeniedError`). As consultas da Inbox rodam nela, com o módulo Atendim
 | `conversations` | `listConversations(ctx, params)` | lista da Inbox |
 | `conversations` | `getConversationDetail(ctx, id)` | detalhe da conversa |
 | `conversations` | `listConversationMessages(ctx, id, params)` | histórico paginado |
+| `conversations` | `listConversationEvents(ctx, id)` | registro do atendimento (E2A) |
+| `conversations` (`sql-commands.ts`) | `claimConversation`, `resolveConversation`, `sendConversationReply` | escritas do atendimento (E2A), pelas funções de 0008 |
+| `simulator` | `listSimulatorChannels`, `listSimulatorContacts`, `simulateInboundMessage` | simulador (só dev/test) |
 | `organizations` | `getActiveContext({ userId })` | contexto ativo do DAL (`lib/auth/dal.ts`) |
 | `organizations` | `listAllOrganizations({ userId })` | `/admin` (confere o papel no banco) |
 | `organizations` | `setOrganizationStatus({ userId, organizationId, status })` | suspender/reativar em `/admin` |

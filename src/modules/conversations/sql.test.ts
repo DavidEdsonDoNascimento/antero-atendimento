@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { mapConversationDetailRow, mapConversationListRow } from "./mappers.ts";
 import {
   buildConversationDetailQuery,
+  buildConversationEventsQuery,
   buildConversationListQuery,
   buildConversationOwnershipQuery,
   buildMessageHistoryQuery,
@@ -87,6 +88,20 @@ test("relações pelas FKs compostas (organization_id + id)", () => {
   assert.match(text, /ct\.organization_id = c\.organization_id AND ct\.id = c\.contact_id/);
   assert.match(text, /wa\.organization_id = c\.organization_id AND wa\.id = c\.whatsapp_account_id/);
   assert.match(text, /LEFT JOIN public\.organization_members am\s+ON am\.organization_id = c\.organization_id AND am\.user_id = c\.assigned_user_id/);
+});
+
+test("detalhe: última mensagem RECEBIDA escopada à organização e à conversa; provedor do canal", () => {
+  const { text } = buildConversationDetailQuery(orgId, conversationId);
+  assert.match(text, /m\.organization_id = c\.organization_id AND m\.conversation_id = c\.id AND m\.direction = 'inbound'/);
+  assert.match(text, /wa\.provider AS channel_provider/);
+});
+
+test("eventos: filtro explícito por organização e conversa, mais recentes primeiro, limite parametrizado", () => {
+  const query = buildConversationEventsQuery(orgId, conversationId, 20);
+  assert.deepEqual(query.values, [orgId, conversationId, 20]);
+  assert.match(query.text, /e\.organization_id = \$1::uuid AND e\.conversation_id = \$2::uuid/);
+  assert.match(query.text, /ORDER BY e\.created_at DESC, e\.id DESC/);
+  assert.match(query.text, /LIMIT \$3::int/);
 });
 
 test("detalhe e posse: organização e conversa como parâmetros", () => {
@@ -200,10 +215,14 @@ test("toConversationDetailRow: inclui assigned_at/resolved_at e passa pelo mapea
     ...baseSqlRow,
     assigned_at: "2026-03-10T09:30:00.123456+00:00",
     resolved_at: null,
+    channel_provider: "development",
+    last_inbound_at: "2026-03-10T09:20:00.000001+00:00",
   };
   const detail = mapConversationDetailRow(toConversationDetailRow(detailSqlRow));
   assert.equal(detail.assignedAt, "2026-03-10T09:30:00.123456+00:00");
   assert.equal(detail.resolvedAt, null);
+  assert.equal(detail.channelProvider, "development");
+  assert.equal(detail.lastInboundAt, "2026-03-10T09:20:00.000001+00:00");
   assert.equal(detail.channel.displayName, "Comercial");
   assert.equal(detail.contact.name, null);
   assert.deepEqual(detail.assignee, { userId: baseSqlRow.assignee_user_id, fullName: "João Atendente" });

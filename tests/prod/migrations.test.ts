@@ -6,7 +6,7 @@
  */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
@@ -42,18 +42,26 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
+// Migrations esperadas: as de db/migrations (fonte oficial, as mesmas que o alvo
+// `migrate` do Dockerfile copia para a imagem), sem lista fixa para manter.
+const EXPECTED_VERSIONS = readdirSync(join(process.cwd(), "db", "migrations"))
+  .filter((name) => /^\d{4}_.+\.sql$/.test(name))
+  .map((name) => name.slice(0, 4))
+  .sort();
+
 const applied = async () => (await admin.query("select version from public.schema_migrations order by 1")).rows.map((r) => r.version);
 
 test("up é idempotente: segunda execução não reaplica nada e sai com 0", async () => {
   const before = await applied();
-  assert.deepEqual(before, ["0000", "0001", "0002", "0003", "0004", "0005", "0006", "0007"]);
+  assert.deepEqual(before, EXPECTED_VERSIONS);
+  assert.ok(EXPECTED_VERSIONS.includes("0008"), "0008_conversation_actions faz parte da imagem de produção");
   const again = dbmate("up");
   assert.equal(again.status, 0, again.out);
   assert.doesNotMatch(again.out, /Applying|Applied/);
   assert.deepEqual(await applied(), before);
   const status = dbmate("status");
   assert.equal(status.status, 0);
-  assert.match(status.out, /Applied: 8/);
+  assert.match(status.out, new RegExp(`Applied: ${EXPECTED_VERSIONS.length}\\b`));
   assert.match(status.out, /Pending: 0/);
 });
 

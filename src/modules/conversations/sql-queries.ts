@@ -22,16 +22,19 @@ import { CONVERSATIONS_PAGE_LIMIT, MESSAGES_PAGE_LIMIT, clampLimit } from "./pag
 import type { MessageHistoryRow } from "./rows";
 import {
   buildConversationDetailQuery,
+  buildConversationEventsQuery,
   buildConversationListQuery,
   buildConversationOwnershipQuery,
   buildMessageHistoryQuery,
   toConversationDetailRow,
   toConversationListRow,
   type ConversationDetailSqlRow,
+  type ConversationEventSqlRow,
   type ConversationListSqlRow,
 } from "./sql.ts";
 import type {
   ConversationDetail,
+  ConversationEventItem,
   ConversationListPage,
   ListConversationMessagesParams,
   ListConversationsParams,
@@ -176,4 +179,32 @@ export async function listConversationMessages(
         ? encodeMessageHistoryCursor({ createdAt: oldestLoaded.created_at, id: oldestLoaded.id })
         : null,
   };
+}
+
+/** Quantos registros de atendimento o detalhe mostra (os mais recentes). */
+export const CONVERSATION_EVENTS_LIMIT = 20;
+
+/**
+ * Registro de atendimento da conversa (assumiu, resolveu, reabriu), mais
+ * recente primeiro. Mesma regra de `getConversationDetail`: conversa inválida,
+ * inexistente ou de outra organização → lista vazia.
+ */
+export async function listConversationEvents(
+  context: OrganizationContext,
+  conversationId: string,
+): Promise<ConversationEventItem[]> {
+  if (!isUuid(conversationId)) return [];
+
+  const rows = await runRead(context, "Falha ao carregar o registro de atendimento", () => false, async (tx) => {
+    const query = buildConversationEventsQuery(context.organizationId, conversationId, CONVERSATION_EVENTS_LIMIT);
+    return (await tx.query<ConversationEventSqlRow>(query.text, query.values)).rows;
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    type: row.event_type,
+    userId: row.user_id,
+    userFullName: row.user_full_name,
+    createdAt: row.created_at,
+  }));
 }

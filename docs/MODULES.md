@@ -8,7 +8,7 @@ identificador de cliente: toda diferença entre organizações é uma linha em
 
 | Identificador | Nome | Finalidade | Rotas | Situação |
 | --- | --- | --- | --- | --- |
-| `atendimento` | Atendimento | Inbox e atendimento humano | `/conversas` | disponível (leitura) |
+| `atendimento` | Atendimento | Inbox e atendimento humano | `/conversas` | disponível (assumir, responder, resolver — `docs/ATENDIMENTO.md`) |
 | `automacoes` | Automações | Fluxos, menus e respostas automáticas | `/fluxos` | em desenvolvimento |
 | `campanhas` | Campanhas | Criação e envio de campanhas | `/campanhas` | em desenvolvimento |
 | `contatos` | Contatos | Gestão, importação e listas comerciais | `/contatos` | em desenvolvimento |
@@ -135,6 +135,6 @@ export async function pausarCampanhaAction(formData: FormData) {
 ```
 
 Tabela nova de um módulo: `organization_id`, RLS com a política da tabela acima e
-pgTAP. O worker, quando existir, confere o módulo antes de processar. Registre a rota
+pgTAP (exemplo: `conversation_events`, 0008). O worker, quando existir, confere o módulo antes de processar. Registre a rota
 em `routes` do catálogo: `modules.test.ts` exige `requireModule` em todas as páginas
 dela, e nunca use a organização ou o módulo enviados pelo navegador.

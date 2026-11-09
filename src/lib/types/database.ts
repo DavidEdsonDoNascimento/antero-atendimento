@@ -22,6 +22,7 @@ export type MessageDeliveryStatus =
   | "delivered"
   | "read"
   | "failed";
+export type ConversationEventType = "assigned" | "resolved" | "reopened";
 
 export type Organization = {
   id: string;
@@ -98,5 +99,16 @@ export type Message = {
   message_type: MessageType;
   content: string;
   delivery_status: MessageDeliveryStatus;
+  /** Chave de idempotência do envio pelo atendente (0008); nula nas demais. */
+  client_message_id: string | null;
+  created_at: string;
+};
+
+export type ConversationEvent = {
+  id: string;
+  organization_id: string;
+  conversation_id: string;
+  event_type: ConversationEventType;
+  user_id: string | null;
   created_at: string;
 };

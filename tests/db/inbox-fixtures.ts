@@ -332,7 +332,12 @@ WHERE c.organization_id = $1
 ORDER BY c.last_message_at DESC, c.id DESC`;
 
 const REFERENCE_DETAIL_SQL = `
-SELECT json_build_object(${REFERENCE_EMBEDS}, 'assigned_at', c.assigned_at, 'resolved_at', c.resolved_at) AS row
+SELECT json_build_object(${REFERENCE_EMBEDS}, 'assigned_at', c.assigned_at, 'resolved_at', c.resolved_at,
+  'channel_provider', (SELECT wa.provider FROM public.whatsapp_accounts wa
+                       WHERE wa.organization_id = c.organization_id AND wa.id = c.whatsapp_account_id),
+  'last_inbound_at', (SELECT max(m.created_at) FROM public.messages m
+                      WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id
+                        AND m.direction = 'inbound')) AS row
 FROM public.conversations c
 WHERE c.organization_id = $1 AND c.id = $2`;
 

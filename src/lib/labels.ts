@@ -1,8 +1,10 @@
 import type { BadgeTone } from "@/components/ui/badge";
 import type {
+  ConversationEventType,
   ConversationStatus,
   MemberRole,
   MemberStatus,
+  MessageDeliveryStatus,
   MessageSender,
   OrganizationStatus,
   WhatsappProvider,
@@ -93,4 +95,20 @@ export const messageSenderLabel: Record<MessageSender, string> = {
   bot: "Bot",
   user: "Atendente",
   system: "Sistema",
+};
+
+/** Situação de envio de uma mensagem enviada pela empresa. */
+export const messageDeliveryLabel: Record<MessageDeliveryStatus, string> = {
+  pending: "Enviando…",
+  sent: "Enviada",
+  delivered: "Entregue",
+  read: "Lida",
+  failed: "Falhou",
+};
+
+/** Registro de atendimento da conversa (`conversation_events`). */
+export const conversationEventLabel: Record<ConversationEventType, string> = {
+  assigned: "assumiu o atendimento",
+  resolved: "resolveu o atendimento",
+  reopened: "Nova mensagem do cliente reabriu a conversa",
 };

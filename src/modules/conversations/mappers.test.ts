@@ -108,6 +108,8 @@ test("mapConversationDetailRow: detalhe completo, campos snake_case convertidos"
     last_message_at: "2024-01-01T10:30:00Z",
     assigned_at: "2024-01-01T10:15:00Z",
     resolved_at: null,
+    channel_provider: "development",
+    last_inbound_at: "2024-01-01T10:20:00Z",
     contact: contactRow,
     whatsapp_account: channelRow,
     assigned_member: assignedRow,
@@ -132,6 +134,8 @@ test("mapConversationDetailRow: detalhe completo, campos snake_case convertidos"
   assert.equal(detail.lastMessageAt, "2024-01-01T10:30:00Z");
   assert.equal(detail.assignedAt, "2024-01-01T10:15:00Z");
   assert.equal(detail.resolvedAt, null);
+  assert.equal(detail.channelProvider, "development");
+  assert.equal(detail.lastInboundAt, "2024-01-01T10:20:00Z");
 });
 
 test("mapConversationDetailRow: conversa resolvida (resolved_at preenchido, sem atendente)", () => {
@@ -142,6 +146,8 @@ test("mapConversationDetailRow: conversa resolvida (resolved_at preenchido, sem 
     last_message_at: "2024-01-01T10:30:00Z",
     assigned_at: null,
     resolved_at: "2024-01-01T11:00:00Z",
+    channel_provider: "cloud_api",
+    last_inbound_at: null,
     contact: contactRow,
     whatsapp_account: channelRow,
     assigned_member: null,

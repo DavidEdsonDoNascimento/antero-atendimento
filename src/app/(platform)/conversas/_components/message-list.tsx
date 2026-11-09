@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconConversations } from "@/components/ui/icons";
-import { messageSenderLabel } from "@/lib/labels";
+import { messageDeliveryLabel, messageSenderLabel } from "@/lib/labels";
 import { cn } from "@/lib/utils/cn";
 import type { ConversationStatusFilter, MessageHistoryPage } from "@/modules/conversations/types";
 
@@ -14,11 +14,17 @@ export function MessageList({
   page,
   status,
   cursor,
+  viewerId,
+  simulated,
 }: {
   conversationId: string;
   page: MessageHistoryPage;
   status: ConversationStatusFilter | undefined;
   cursor: string | undefined;
+  /** Quem está vendo: as próprias respostas aparecem como "Você" (o nome dos demais não é exposto). */
+  viewerId: string;
+  /** Canal de desenvolvimento: o envio é marcado como simulado, nunca como entregue pelo WhatsApp. */
+  simulated: boolean;
 }) {
   if (page.items.length === 0) {
     return (
@@ -69,11 +75,23 @@ export function MessageList({
                   isOutbound && "justify-end",
                 )}
               >
-                <span>{messageSenderLabel[message.sender]}</span>
+                <span>
+                  {message.sender === "user" && message.senderUserId === viewerId
+                    ? "Você"
+                    : messageSenderLabel[message.sender]}
+                </span>
                 <span aria-hidden>·</span>
                 <span>{formatMessageTime(message.createdAt)}</span>
-                {message.deliveryStatus === "failed" && (
-                  <span className="font-medium text-red-400">Falhou</span>
+                {isOutbound && (
+                  <>
+                    <span aria-hidden>·</span>
+                    <span className={cn(message.deliveryStatus === "failed" && "font-medium text-red-400")}>
+                      {messageDeliveryLabel[message.deliveryStatus]}
+                    </span>
+                  </>
+                )}
+                {simulated && isOutbound && message.deliveryStatus !== "failed" && (
+                  <span className="rounded border border-sky-500/20 px-1 text-sky-300">simulada</span>
                 )}
               </p>
             </div>

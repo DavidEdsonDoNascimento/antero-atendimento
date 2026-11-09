@@ -4,6 +4,8 @@ import type {
   MessageDirection,
   MessageSender,
   MessageType,
+  WhatsappProvider,
+  ConversationEventType,
 } from "@/lib/types/database";
 
 /**
@@ -67,6 +69,20 @@ export type ConversationDetail = {
   lastMessageAt: string;
   assignedAt: string | null;
   resolvedAt: string | null;
+  /** `development`: canal simulado — nada sai para o WhatsApp. */
+  channelProvider: WhatsappProvider;
+  /** Última mensagem recebida do cliente: base da janela de 24 h. */
+  lastInboundAt: string | null;
+};
+
+export type ConversationEventItem = {
+  id: string;
+  type: ConversationEventType;
+  /** Quem assumiu/resolveu; nulo na reabertura (foi o cliente). */
+  userId: string | null;
+  /** Nulo quando a RLS oculta o perfil (vínculo não está mais ativo). */
+  userFullName: string | null;
+  createdAt: string;
 };
 
 export type MessageHistoryItem = {
