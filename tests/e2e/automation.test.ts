@@ -213,3 +213,48 @@ test("ferramenta do fluxo e Automações: atendente não instala, e organizaçã
   const flows = await row("SELECT count(*)::int AS n FROM public.automation_flows WHERE organization_id = $1", [f.orgB]);
   assert.equal(flows.n, 0);
 });
+
+test("rajada pelo simulador: três respostas enviadas quase juntas são todas processadas, na ordem de gravação", async () => {
+  const owner = await login("aOwner");
+  const phone = "+5511955558002";
+  const simulateId = actionIdIn((await owner.page(`/simulador?canal=${f.accountA}`)).html, 'name="phoneNumber"');
+  const send = (content: string) =>
+    owner.action("/simulador", simulateId, { channelId: f.accountA, phoneNumber: phone, contactName: "Cliente Rajada", content, repeatExternalId: "" });
+  await send("Oi");
+  await send("Eventos particulares"); // pergunta o nome
+
+  const burst = ["Ana Rajada", "60", "15/12"];
+  const responses = await Promise.all(
+    burst.map((content, index) => new Promise((resolve) => setTimeout(resolve, index * 15)).then(() => send(content))),
+  );
+  for (const response of responses) assert.equal(response.status, 200);
+
+  const conversation = await row(
+    "SELECT c.id FROM public.conversations c JOIN public.contacts ct ON ct.id = c.contact_id WHERE ct.organization_id = $1 AND ct.phone_number = $2",
+    [f.orgA, phone],
+  );
+  const arrival = (
+    await fixture.query(
+      "SELECT content FROM public.messages WHERE conversation_id = $1 AND content = ANY($2::text[]) ORDER BY arrival_order",
+      [conversation.id, burst],
+    )
+  ).rows.map((message) => message.content);
+  const session = await row("SELECT status, state -> 'answers' AS answers FROM public.automation_sessions WHERE conversation_id = $1", [conversation.id]);
+  assert.equal(session.status, "handed_off");
+  assert.deepEqual(
+    session.answers.map((answer: { value: string }) => answer.value),
+    arrival,
+    "cada resposta na pergunta seguinte, na ordem em que foram gravadas",
+  );
+  const pending = await row(
+    `SELECT count(*)::int AS n FROM public.messages m WHERE m.conversation_id = $1 AND m.direction = 'inbound'
+       AND NOT EXISTS (SELECT 1 FROM public.automation_executions e WHERE e.message_id = m.id)`,
+    [conversation.id],
+  );
+  assert.equal(pending.n, 0, "nenhuma mensagem válida ficou sem processar");
+  const duplicated = await row(
+    "SELECT count(*)::int AS n FROM public.messages WHERE conversation_id = $1 AND sender_type = 'bot' AND content IN ('Quantos convidados, aproximadamente?', 'Qual a data desejada?')",
+    [conversation.id],
+  );
+  assert.equal(duplicated.n, 2, "cada pergunta enviada uma única vez");
+});
