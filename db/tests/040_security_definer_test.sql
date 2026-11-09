@@ -26,7 +26,10 @@ SELECT set_eq(
     'handle_new_user()', 'handle_user_email_updated()',
     'ingest_inbound_message(uuid,text,text,text,text)',
     'current_user_suspended_organizations()', 'set_organization_status(uuid,organization_status)',
-    'set_organization_module(uuid,organization_module,boolean)'
+    'set_organization_module(uuid,organization_module,boolean)',
+    'assert_attendance_access(uuid)', 'claim_conversation(uuid,uuid)', 'resolve_conversation(uuid,uuid)',
+    'send_conversation_reply(uuid,uuid,text,uuid)',
+    'record_outbound_result(uuid,uuid,message_delivery_status,text)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );
@@ -62,7 +65,10 @@ SELECT set_eq(
     'public.is_platform_admin()', 'public.is_org_member(uuid)', 'public.is_org_admin(uuid)',
     'public.shares_org_with(uuid)', 'public.ingest_inbound_message(uuid,text,text,text,text)',
     'public.current_user_suspended_organizations()', 'public.set_organization_status(uuid,organization_status)',
-    'public.has_module(uuid,organization_module)', 'public.set_organization_module(uuid,organization_module,boolean)'
+    'public.has_module(uuid,organization_module)', 'public.set_organization_module(uuid,organization_module,boolean)',
+    'public.claim_conversation(uuid,uuid)', 'public.resolve_conversation(uuid,uuid)',
+    'public.send_conversation_reply(uuid,uuid,text,uuid)',
+    'public.record_outbound_result(uuid,uuid,message_delivery_status,text)'
   ],
   'antero_app executa exatamente as funções necessárias (gatilhos e set_updated_at fora)'
 );
