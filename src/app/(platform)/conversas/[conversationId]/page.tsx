@@ -2,10 +2,12 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { organizationContextOf, requireModule } from "@/lib/auth/dal";
-import { getConversationDetail } from "@/modules/conversations/sql-queries";
+import { getConversationDetail, listConversationEvents } from "@/modules/conversations/sql-queries";
 import { parseConversationStatusFilter, parseCursorParam } from "@/modules/conversations/search-params";
 
+import { AutoRefresh } from "../_components/auto-refresh";
 import { ConversationsShell } from "../_components/conversations-shell";
+import { SimulatorLink } from "../_components/simulator-link";
 import { loadConversationList, loadConversationMessages } from "../_lib/loaders";
 import type { ConversationDetailState } from "../_lib/types";
 
@@ -24,7 +26,8 @@ export default async function ConversaDetalhePage({
   params,
   searchParams,
 }: ConversaDetalhePageProps) {
-  const context = organizationContextOf(await requireModule("atendimento"));
+  const active = await requireModule("atendimento");
+  const context = organizationContextOf(active);
   const { conversationId } = await params;
   const sp = await searchParams;
   const status = parseConversationStatusFilter(sp.status);
@@ -40,20 +43,25 @@ export default async function ConversaDetalhePage({
     getConversationDetail(context, conversationId),
   ]);
 
-  const detailState: ConversationDetailState = detail
-    ? {
-        kind: "found",
-        detail,
-        messages: await loadConversationMessages(context, conversationId, messagesCursor),
-      }
-    : { kind: "not-found" };
+  const [messages, events] = detail
+    ? await Promise.all([
+        loadConversationMessages(context, conversationId, messagesCursor),
+        listConversationEvents(context, conversationId),
+      ])
+    : [null, null];
+  const detailState: ConversationDetailState =
+    detail && messages && events
+      ? { kind: "found", detail, messages, events, viewer: { userId: active.userId, role: active.role } }
+      : { kind: "not-found" };
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Conversas"
-        description="Caixa de entrada de atendimento — somente leitura."
+        description="Caixa de entrada de atendimento."
+        actions={<SimulatorLink />}
       />
+      <AutoRefresh />
       <ConversationsShell
         listPage={listPage}
         selectedId={conversationId}

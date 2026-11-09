@@ -82,7 +82,10 @@ const replyInputSchema = z.object({
   content: z.string().max(10_000),
 });
 
-export async function sendReplyAction(previous: ReplyActionState, formData: FormData): Promise<ReplyActionState> {
+export async function sendReplyAction(
+  previous: ReplyActionState | undefined,
+  formData: FormData,
+): Promise<ReplyActionState> {
   const context = organizationContextOf(await requireModule("atendimento"));
   const input = replyInputSchema.safeParse({
     conversationId: formData.get("conversationId"),
@@ -93,7 +96,8 @@ export async function sendReplyAction(previous: ReplyActionState, formData: Form
     return {
       status: "error",
       message: "Dados inválidos. Recarregue a página e tente novamente.",
-      clientMessageId: previous.clientMessageId,
+      // POST direto, sem a tela, pode não trazer o estado anterior.
+      clientMessageId: previous?.clientMessageId ?? randomUUID(),
       draft: typeof formData.get("content") === "string" ? String(formData.get("content")) : "",
     };
   }

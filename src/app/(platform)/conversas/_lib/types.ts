@@ -1,4 +1,9 @@
-import type { ConversationDetail, MessageHistoryPage } from "@/modules/conversations/types";
+import type { AttendanceViewer } from "@/modules/conversations/attendance";
+import type {
+  ConversationDetail,
+  ConversationEventItem,
+  MessageHistoryPage,
+} from "@/modules/conversations/types";
 
 /**
  * Estado do painel de detalhe da caixa de conversas — representa
@@ -9,4 +14,11 @@ import type { ConversationDetail, MessageHistoryPage } from "@/modules/conversat
 export type ConversationDetailState =
   | { kind: "none" }
   | { kind: "not-found" }
-  | { kind: "found"; detail: ConversationDetail; messages: MessageHistoryPage };
+  | {
+      kind: "found";
+      detail: ConversationDetail;
+      messages: MessageHistoryPage;
+      events: ConversationEventItem[];
+      /** Quem está vendo (sessão + papel na organização ativa): só orienta quais botões mostrar. */
+      viewer: AttendanceViewer;
+    };
