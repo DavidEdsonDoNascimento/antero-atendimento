@@ -159,6 +159,8 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `060_ingest_concurrency_test` | concorrência real com duas conexões (dblink) |
 | `070_organization_guard_test` | suspensão efetiva, campos protegidos de `organizations`, canal só leitura |
 | `071_organization_status_operation_test` | funções da suspensão: autorização, catálogo e privilégios efetivos |
+| `080_organization_modules_test` | módulos por organização: `has_module`, `set_organization_module`, RLS |
+| `090_conversation_actions_test` | assumir, responder, resolver e reabrir (0008), janela de 24 h, `conversation_events` |
 
 ## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 

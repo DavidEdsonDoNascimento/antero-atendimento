@@ -42,7 +42,9 @@ src/
     layout/              # Sidebar, Header, UserMenu, navegação
   modules/               # lógica por domínio de negócio
     auth/                # schemas + server actions
-    conversations/       # DAL da Inbox (cursor, paginação, mapeadores)
+    conversations/       # Inbox: leitura (sql-queries), atendimento (sql-commands, actions)
+    messaging/           # contrato de envio por canal (provedor simulado)
+    simulator/           # simulador de mensagens recebidas (só dev/test)
     organizations/  users/  whatsapp/   # consultas SQL por domínio (sql-queries.ts)
   lib/
     db/                  # PostgreSQL próprio: pool antero_app, withUserTransaction,
@@ -97,7 +99,8 @@ frontend.
 
 ## Integração com WhatsApp
 
-No Ciclo 1 existe apenas a modelagem (`whatsapp_accounts`) e o provedor de
-**desenvolvimento** (simulado). O contrato de provedor e o webhook real
-(WhatsApp Cloud API) chegam nos Ciclos 2–4, sem reescrever contatos, conversas
-e mensagens.
+O provedor de **desenvolvimento** é simulado: mensagens recebidas entram pelo
+simulador (`/simulador`, só em `next dev`) e as respostas saem pelo
+`MessagingProvider` simulado (`modules/messaging`), sem rede nem token. O
+provedor da Cloud API e o webhook real chegam nas próximas entregas (E2B–E2D),
+sem reescrever as regras de atendimento. Ver `docs/ATENDIMENTO.md`.
