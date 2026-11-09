@@ -129,7 +129,11 @@ test("loaders da Inbox com o contexto do DAL: cursor adulterado volta à 1ª pá
   );
 });
 
-const SERVER_ACTION_FILES = ["src/modules/organizations/actions.ts"];
+const SERVER_ACTION_FILES = [
+  "src/modules/organizations/actions.ts",
+  // E2A: atendimento (assumir, resolver, responder).
+  "src/modules/conversations/actions.ts",
+];
 
 test("nenhum código da aplicação usa auth.api.* ou a instância do Better Auth fora de src/lib/identity", () => {
   const root = new URL("../../src/", import.meta.url).pathname;

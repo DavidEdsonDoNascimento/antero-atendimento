@@ -94,6 +94,8 @@ export function mapConversationDetailRow(row: ConversationDetailRow): Conversati
     lastMessageAt: row.last_message_at,
     assignedAt: row.assigned_at,
     resolvedAt: row.resolved_at,
+    channelProvider: row.channel_provider,
+    lastInboundAt: row.last_inbound_at,
   };
 }
 

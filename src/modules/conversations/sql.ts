@@ -1,7 +1,9 @@
 import type {
+  ConversationEventType,
   ConversationStatus,
   MessageDirection,
   MessageSender,
+  WhatsappProvider,
 } from "@/lib/types/database";
 
 import type { ConversationCursor, MessageHistoryCursor } from "./cursor";
@@ -64,6 +66,8 @@ export type ConversationListSqlRow = ConversationBaseSqlRow & {
 export type ConversationDetailSqlRow = ConversationBaseSqlRow & {
   assigned_at: string | null;
   resolved_at: string | null;
+  channel_provider: WhatsappProvider;
+  last_inbound_at: string | null;
 };
 
 const CONVERSATION_COLUMNS = `
@@ -169,11 +173,20 @@ ORDER BY c.last_message_at DESC, c.id DESC`,
   };
 }
 
-/** Detalhe de uma conversa, escopado à organização. */
+/**
+ * Detalhe de uma conversa, escopado à organização. Inclui o provedor do canal
+ * (mensagens simuladas são identificadas na tela) e a última mensagem RECEBIDA,
+ * base da janela de 24 h — a mesma consulta que `send_conversation_reply` faz.
+ */
 export function buildConversationDetailQuery(organizationId: string, conversationId: string): SqlQuery {
   return {
     text: `
-SELECT ${CONVERSATION_COLUMNS}, c.assigned_at, c.resolved_at
+SELECT ${CONVERSATION_COLUMNS}, c.assigned_at, c.resolved_at,
+  wa.provider AS channel_provider,
+  (SELECT m.created_at FROM public.messages m
+   WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.direction = 'inbound'
+   ORDER BY m.created_at DESC, m.id DESC
+   LIMIT 1) AS last_inbound_at
 FROM public.conversations c
 ${CONVERSATION_JOINS}
 WHERE c.organization_id = $1::uuid AND c.id = $2::uuid`,
@@ -186,6 +199,32 @@ export function buildConversationOwnershipQuery(organizationId: string, conversa
   return {
     text: "SELECT c.id FROM public.conversations c WHERE c.organization_id = $1::uuid AND c.id = $2::uuid",
     values: [organizationId, conversationId],
+  };
+}
+
+export type ConversationEventSqlRow = {
+  id: string;
+  event_type: ConversationEventType;
+  user_id: string | null;
+  user_full_name: string | null;
+  created_at: string;
+};
+
+/**
+ * Registro de atendimento da conversa, mais recente primeiro. O nome vem de
+ * LEFT JOIN em profiles: a RLS oculta quem não tem mais vínculo ativo (nome
+ * nulo), como no responsável da conversa.
+ */
+export function buildConversationEventsQuery(organizationId: string, conversationId: string, limit: number): SqlQuery {
+  return {
+    text: `
+SELECT e.id, e.event_type, e.user_id, p.full_name AS user_full_name, e.created_at
+FROM public.conversation_events e
+LEFT JOIN public.profiles p ON p.id = e.user_id
+WHERE e.organization_id = $1::uuid AND e.conversation_id = $2::uuid
+ORDER BY e.created_at DESC, e.id DESC
+LIMIT $3::int`,
+    values: [organizationId, conversationId, limit],
   };
 }
 
@@ -276,5 +315,11 @@ export function toConversationListRow(row: ConversationListSqlRow): Conversation
 
 /** Linha do detalhe no formato de `ConversationDetailRow`. */
 export function toConversationDetailRow(row: ConversationDetailSqlRow): ConversationDetailRow {
-  return { ...assembleBase(row), assigned_at: row.assigned_at, resolved_at: row.resolved_at };
+  return {
+    ...assembleBase(row),
+    assigned_at: row.assigned_at,
+    resolved_at: row.resolved_at,
+    channel_provider: row.channel_provider,
+    last_inbound_at: row.last_inbound_at,
+  };
 }

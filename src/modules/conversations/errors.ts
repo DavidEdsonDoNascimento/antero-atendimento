@@ -1,3 +1,5 @@
+import type { AttendanceErrorCode } from "./attendance";
+
 /**
  * Erros tipados da DAL de leitura de conversas — permitem ao chamador
  * diferenciar falha de consulta de cursor inválido, em vez de um `catch`
@@ -30,5 +32,21 @@ export class InvalidCursorError extends Error {
   constructor() {
     super("Cursor de paginação inválido.");
     this.name = "InvalidCursorError";
+  }
+}
+
+/**
+ * Operação de atendimento recusada pelo banco (assumir, responder, resolver).
+ * `code` é o motivo de negócio — a tela escolhe a mensagem por ele
+ * (`attendanceErrorMessage` em `attendance.ts`); nada do conteúdo da mensagem
+ * ou do contato entra aqui.
+ */
+export class AttendanceActionError extends Error {
+  readonly code: AttendanceErrorCode;
+
+  constructor(code: AttendanceErrorCode, options?: ErrorOptions) {
+    super(`Operação de atendimento recusada: ${code}.`, options);
+    this.name = "AttendanceActionError";
+    this.code = code;
   }
 }

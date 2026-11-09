@@ -4,6 +4,7 @@ import type {
   MessageDirection,
   MessageSender,
   MessageType,
+  WhatsappProvider,
 } from "@/lib/types/database";
 
 /**
@@ -72,6 +73,8 @@ export type ConversationDetailRow = {
   last_message_at: string;
   assigned_at: string | null;
   resolved_at: string | null;
+  channel_provider: WhatsappProvider;
+  last_inbound_at: string | null;
   contact: ConversationContactRow;
   whatsapp_account: ConversationChannelRow;
   assigned_member: ConversationAssignedMemberRow | null;
