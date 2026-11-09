@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { PHASE_DEVELOPMENT_SERVER } from "next/constants";
+import { PHASE_DEVELOPMENT_SERVER } from "next/constants.js";
 
 // Extensões padrão do Next.js. No servidor de desenvolvimento (`next dev`,
 // inclusive o dos testes E2E) somam-se `.dev.tsx`/`.dev.ts`: páginas só de
