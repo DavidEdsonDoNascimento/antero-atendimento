@@ -34,6 +34,12 @@
 **/.git
 **/.DS_Store
 **/*.tmp
+# Simulador de mensagens: só desenvolvimento (a rota nem é compilada por
+# `next build`; ver next.config.ts). Fora do contexto, por garantia.
+**/*.dev.ts
+**/*.dev.tsx
+src/modules/simulator
+src/app/(platform)/simulador
 # Testes não fazem parte da imagem (rodam fora do Docker: pnpm test:unit).
 **/*.test.ts
 **/*.test.tsx
