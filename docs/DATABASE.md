@@ -411,14 +411,17 @@ preenchida por gatilho. Regras, SQLSTATEs e o simulador: `docs/ATENDIMENTO.md`.
 
 Fluxos em JSON versionado (`automation_flows` + `automation_flow_versions`
 imutáveis), sessão presa à versão (`automation_sessions`) e uma execução por
-mensagem recebida (`automation_executions`, `UNIQUE (message_id)`). As respostas
+mensagem recebida (`automation_executions`, `UNIQUE (message_id)`), em ordem de
+`messages.arrival_order` (identity, atribuída no INSERT sob a trava da conversa). As respostas
 vão para `messages` (`sender_type = 'bot'`, `payload`, `automation_execution_id`),
 sem tabela paralela. `antero_app` só lê; a configuração é por
 `save_automation_flow`/`publish_automation_flow`/`set_automation_flow_status`
 (owner/admin + módulo) e a execução por funções `*_internal` sem EXECUTE, hoje
 alcançadas só pela porta de desenvolvimento `dev_automation_*` (canal
 `development`, owner/admin). Gatilho em `conversations` interrompe a sessão ativa
-quando a conversa sai de `bot` por outro caminho. Regras e SQLSTATEs:
+quando a conversa sai de `bot` por outro caminho; `automation_begin_delivery_internal`
+barra respostas pendentes se o módulo, a organização, o canal ou um atendente
+mudou. Regras e SQLSTATEs:
 `docs/AUTOMACOES.md`.
 
 ### Entrada de sistema (webhook/worker) — desenho futuro

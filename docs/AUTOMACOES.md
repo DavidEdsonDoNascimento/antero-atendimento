@@ -13,7 +13,7 @@ no motor.
 | Motor | `modules/automations/engine.ts` | `startSession(def, entrada, ctx)` e `advance(def, estado, entrada, ctx)` → `{ status, state, outputs, reason }`. Puro e determinístico: sem I/O, relógio ou aleatoriedade |
 | Ações | `modules/automations/actions.ts` | `text`, `image`, `list` — o que enviar, sem saber como; `toMessageRecord` gera o texto do histórico |
 | Cloud API | `modules/messaging/cloud-api.ts` | Corpo de `/messages` para cada ação e leitura de `list_reply`, sem transporte |
-| Executor | `modules/automations/runner.ts` | prepare → motor → commit (uma transação) → provedor → resultado do envio |
+| Executor | `modules/automations/runner.ts` | prepare → motor → commit (uma transação), repetido enquanto houver mensagem pendente; para cada resposta, trava de envio → provedor → resultado |
 | Configuração | `modules/automations/sql-commands.ts` | `saveFlowDraft`, `publishFlow`, `setFlowStatus` (contrato do editor E3B) |
 | Banco | `db/migrations/0009`, `0010` | Fluxos, versões, sessões, execuções, funções e RLS |
 
@@ -71,8 +71,8 @@ Decidido por `automation_prepare_internal`, com a conversa travada:
 | Mensagem já processada | nada (`already_processed`) |
 | Sessão ativa, Automações desligado | sessão `interrupted` (`module_disabled`), conversa volta a `waiting`, nada enviado |
 | Sessão ativa, fluxo pausado | idem, `flow_paused` |
-| Sessão ativa, mensagem mais antiga que a última processada | nada (`stale`) |
-| Sessão ativa, conversa `bot` | **avança** |
+| Sessão ativa, conversa `bot` | **avança** com a mensagem pendente mais antiga |
+| Sessão ativa, nenhuma pendente | nada (`already_processed`) |
 | Sem sessão: conversa `waiting`, sem responsável, primeira mensagem do ciclo, ciclo sem sessão, fluxo de entrada ativo | **começa** (conversa → `bot`) |
 | Qualquer outro caso (`human`, `resolved`, `waiting` depois de encaminhamento) | nada |
 
@@ -90,10 +90,27 @@ conversa (índice único parcial). Sobrevive a reinício: nada fica em memória.
 
 `automation_executions`: uma linha por mensagem recebida processada, `UNIQUE
 (message_id)`. Reentrega da mesma mensagem → `already_processed`, sem nova
-resposta. Duas mensagens simultâneas: a conversa é travada (`FOR UPDATE`) do
-prepare ao COMMIT; a segunda espera e lê o estado novo, e o commit ainda
-confere sessão, revisão e versão (`AU005`). Se a mais nova ganhar a trava, a
-mais antiga é ignorada como `stale`.
+resposta.
+
+### Mensagens em sequência rápida
+
+- **Ordem:** `messages.arrival_order` (identity), atribuída no INSERT da
+  ingestão, que trava a conversa antes de gravar. Numa conversa, segue a ordem
+  em que as mensagens foram gravadas. `created_at` não serve: é o início da
+  transação, e duas ingestões simultâneas podem tê-lo invertido.
+- **Fila:** a entrada de cada passo é sempre a mensagem **pendente mais antiga**
+  da sessão (sem execução, depois da última processada), não a que disparou o
+  executor. Quem obtém a trava processa a fila inteira, em ordem; o executor das
+  outras mensagens encontra `already_processed`. Até 20 por chamada.
+- **Abertura:** a sessão começa só pela primeira mensagem do ciclo; as que
+  chegaram junto viram a fila da sessão nova e são processadas em seguida.
+- **Conferência:** a conversa fica travada (`FOR UPDATE`) do prepare ao COMMIT, e
+  o commit recusa entrada, sessão, revisão ou versão diferentes das que o
+  prepare escolheria agora (`AU005`).
+
+Antes (corrigido na finalização da E3A): cada execução processava só a própria
+mensagem; quando o executor da mais nova chegava primeiro, ela ocupava a
+pergunta da anterior, e a anterior era descartada.
 
 ## Mensagens
 
@@ -103,6 +120,24 @@ Respostas da automação são mensagens comuns em `messages`: `outbound`,
 tabela paralela. Envio em duas fases como na E2A: `pending` no commit, provedor
 fora da transação, `dev_automation_record_delivery` grava `sent`/`failed`. A
 Inbox mostra "Automação" (cor própria) e "simulada" em canal de desenvolvimento.
+
+### Trava de envio
+
+Imediatamente antes de cada resposta ir ao provedor,
+`automation_begin_delivery_internal` confere organização ativa, Automações
+habilitado, canal conectado e conversa que não esteja com atendente. Se algo
+mudou desde o commit, a resposta vira `failed` e não sai. Organização suspensa:
+a porta de desenvolvimento recusa, nada mais sai e a pendente fica como está.
+Se a suspensão acontecer entre o provedor aceitar e o resultado ser gravado, a
+resposta enviada fica `pending` (limitação da fase 2, como na E2A).
+
+### Desligar Automações ou suspender
+
+| Momento | Efeito |
+| --- | --- |
+| Antes da mensagem do cliente | nada começa nem avança; a sessão ativa é interrompida (`module_disabled`) e a conversa volta à equipe, sem resposta |
+| Entre o commit e o envio | a trava de envio impede as respostas que ainda não saíram |
+| Organização suspensa | nenhuma porta age; nada é processado nem enviado |
 
 ## Encaminhamento humano
 
@@ -160,7 +195,7 @@ deve ser afrouxada para isso.
 | `AU002` | o rascunho mudou depois de validado |
 | `AU003` | definição malformada |
 | `AU004` | ativar fluxo nunca publicado |
-| `AU005` | sessão, revisão ou versão mudou desde a leitura |
+| `AU005` | entrada, sessão, revisão ou versão mudou desde a leitura |
 | `AU006` | a mensagem não é mais elegível (outra execução venceu) |
 | `AU007` | resultado do motor malformado |
 | `AU008` | encaminhar sem o módulo Atendimento |
@@ -179,8 +214,14 @@ deve ser afrouxada para isso.
 
 - Entrada `selection` (id da lista) já existe no motor; o simulador e a ingestão
   ainda gravam só texto. A leitura de `list_reply` entra com a E3C.
-- Mensagem processada fora de ordem (corrida): a mais antiga é ignorada.
+- Ordem entre mensagens que a ingestão grava ao mesmo tempo é a ordem em que
+  ela as serializou. A ordem de envio do cliente (timestamp da Meta) só entra
+  com o webhook real (E2B).
+- Sem fila: a fila de uma conversa só anda quando chega uma mensagem ou uma
+  reentrega dela. Uma mensagem cujo executor caiu antes de processar espera a
+  próxima. O worker (E2B) deve varrer pendências.
 - Resposta `pending` depois de queda entre envio e resultado: como na E2A, é do worker.
 - Sem Atendimento, uma conversa já em `waiting` (por exemplo, encaminhada antes
   de desligarem o módulo) não volta para o robô sozinha.
-- Desligar Automações interrompe a sessão na próxima mensagem, não no ato.
+- Desligar Automações interrompe a sessão na próxima mensagem, não no ato; o
+  que já estava gravado para envio é barrado pela trava de envio.
