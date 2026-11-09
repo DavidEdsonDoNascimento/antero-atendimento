@@ -108,7 +108,7 @@ $$;
 -- ---------------------------------------------------------------------------
 SELECT has_table('public', 'conversation_events', 'tabela conversation_events existe');
 SELECT columns_are('public', 'conversation_events', ARRAY['id', 'organization_id', 'conversation_id', 'event_type', 'user_id', 'created_at'], 'colunas exatas');
-SELECT enum_has_labels('public', 'conversation_event_type', ARRAY['assigned', 'resolved', 'reopened'], 'tipos de evento');
+SELECT enum_has_labels('public', 'conversation_event_type', ARRAY['assigned', 'resolved', 'reopened', 'automation_started', 'handed_off'], 'tipos de evento (0009 acrescenta os da automação)');
 SELECT fk_ok('public', 'conversation_events', ARRAY['organization_id', 'conversation_id'], 'public', 'conversations', ARRAY['organization_id', 'id'], 'FK composta para conversations');
 SELECT fk_ok('public', 'conversation_events', ARRAY['organization_id', 'user_id'], 'public', 'organization_members', ARRAY['organization_id', 'user_id'], 'FK composta para organization_members');
 SELECT ok((SELECT relrowsecurity FROM pg_class WHERE oid = 'public.conversation_events'::regclass), 'RLS habilitada em conversation_events');

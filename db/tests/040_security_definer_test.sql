@@ -29,7 +29,15 @@ SELECT set_eq(
     'set_organization_module(uuid,organization_module,boolean)',
     'assert_attendance_access(uuid)', 'claim_conversation(uuid,uuid)', 'resolve_conversation(uuid,uuid)',
     'send_conversation_reply(uuid,uuid,text,uuid)',
-    'record_outbound_result(uuid,uuid,message_delivery_status,text)'
+    'record_outbound_result(uuid,uuid,message_delivery_status,text)',
+    'assert_automation_admin(uuid)', 'save_automation_flow(uuid,text,text,jsonb,boolean)',
+    'publish_automation_flow(uuid,uuid,integer)', 'set_automation_flow_status(uuid,uuid,automation_flow_status)',
+    'automation_interrupt_internal(uuid,uuid,text)', 'automation_prepare_internal(uuid)',
+    'automation_commit_internal(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
+    'automation_record_delivery_internal(uuid,message_delivery_status,text)',
+    'assert_dev_automation_access(uuid)', 'dev_automation_prepare(uuid)',
+    'dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
+    'dev_automation_record_delivery(uuid,message_delivery_status,text)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );
@@ -68,7 +76,11 @@ SELECT set_eq(
     'public.has_module(uuid,organization_module)', 'public.set_organization_module(uuid,organization_module,boolean)',
     'public.claim_conversation(uuid,uuid)', 'public.resolve_conversation(uuid,uuid)',
     'public.send_conversation_reply(uuid,uuid,text,uuid)',
-    'public.record_outbound_result(uuid,uuid,message_delivery_status,text)'
+    'public.record_outbound_result(uuid,uuid,message_delivery_status,text)',
+    'public.save_automation_flow(uuid,text,text,jsonb,boolean)', 'public.publish_automation_flow(uuid,uuid,integer)',
+    'public.set_automation_flow_status(uuid,uuid,automation_flow_status)', 'public.dev_automation_prepare(uuid)',
+    'public.dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
+    'public.dev_automation_record_delivery(uuid,message_delivery_status,text)'
   ],
   'antero_app executa exatamente as funções necessárias (gatilhos e set_updated_at fora)'
 );
