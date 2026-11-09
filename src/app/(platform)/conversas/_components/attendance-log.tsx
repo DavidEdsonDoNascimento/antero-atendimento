@@ -1,9 +1,9 @@
-import { conversationEventLabel } from "@/lib/labels";
+import { conversationEventLabel, conversationEventWithoutUserLabel } from "@/lib/labels";
 import type { ConversationEventItem } from "@/modules/conversations/types";
 
 import { formatLastActivity, formatMessageTime } from "../_lib/format";
 
-/** Registro de atendimento (quem assumiu, quem resolveu, quando reabriu), sem JS. */
+/** Registro de atendimento (quem assumiu, quem resolveu, quando reabriu, passagens da automação), sem JS. */
 export function AttendanceLog({ events, viewerId }: { events: ConversationEventItem[]; viewerId: string }) {
   if (events.length === 0) return null;
   return (
@@ -22,9 +22,9 @@ export function AttendanceLog({ events, viewerId }: { events: ConversationEventI
               <span className="tabular-nums">{day === time ? time : `${day} ${time}`}</span>
               <span aria-hidden>·</span>
               <span className="text-muted">
-                {event.type === "reopened"
-                  ? conversationEventLabel.reopened
-                  : `${event.userId ? who : "Sistema"} ${conversationEventLabel[event.type]}`}
+                {event.userId
+                  ? `${who} ${conversationEventLabel[event.type]}`
+                  : (conversationEventWithoutUserLabel[event.type] ?? `Sistema ${conversationEventLabel[event.type]}`)}
               </span>
             </li>
           );

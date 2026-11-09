@@ -63,11 +63,19 @@ export function MessageList({
             <div
               className={cn(
                 "max-w-[80%] rounded-lg border px-3 py-2 text-sm",
-                isOutbound
-                  ? "border-gold/20 bg-gold/10 text-foreground"
-                  : "border-line bg-surface-2 text-foreground",
+                // Automação com cor própria: nunca se confunde com resposta de atendente.
+                message.sender === "bot"
+                  ? "border-sky-500/20 bg-sky-500/10 text-foreground"
+                  : isOutbound
+                    ? "border-gold/20 bg-gold/10 text-foreground"
+                    : "border-line bg-surface-2 text-foreground",
               )}
             >
+              {message.messageType !== "text" && (
+                <span className="mb-1 inline-block rounded border border-sky-500/30 px-1 text-[11px] text-sky-300">
+                  {message.messageType === "image" ? "imagem" : "menu de opções"}
+                </span>
+              )}
               <p className="whitespace-pre-wrap break-words">{message.content}</p>
               <p
                 className={cn(

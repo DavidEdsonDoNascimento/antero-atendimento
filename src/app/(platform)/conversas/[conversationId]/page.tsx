@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { PageHeader } from "@/components/ui/page-header";
 import { organizationContextOf, requireModule } from "@/lib/auth/dal";
+import { getConversationAutomation } from "@/modules/automations/sql-queries";
 import { getConversationDetail, listConversationEvents } from "@/modules/conversations/sql-queries";
 import { parseConversationStatusFilter, parseCursorParam } from "@/modules/conversations/search-params";
 
@@ -43,15 +44,16 @@ export default async function ConversaDetalhePage({
     getConversationDetail(context, conversationId),
   ]);
 
-  const [messages, events] = detail
+  const [messages, events, automation] = detail
     ? await Promise.all([
         loadConversationMessages(context, conversationId, messagesCursor),
         listConversationEvents(context, conversationId),
+        getConversationAutomation(context, conversationId),
       ])
-    : [null, null];
+    : [null, null, null];
   const detailState: ConversationDetailState =
     detail && messages && events
-      ? { kind: "found", detail, messages, events, viewer: { userId: active.userId, role: active.role } }
+      ? { kind: "found", detail, messages, events, automation, viewer: { userId: active.userId, role: active.role } }
       : { kind: "not-found" };
 
   return (
