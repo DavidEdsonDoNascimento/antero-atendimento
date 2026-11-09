@@ -103,7 +103,7 @@ BEGIN
   FROM public.dev_automation_commit(
     v_msg, r.session_id, r.session_revision, r.flow_version_id,
     p_status::public.automation_session_status, p_step,
-    jsonb_build_object('stepId', coalesce(p_step, 'fim'), 'answers', jsonb_build_object('nome', jsonb_build_object('label', 'Nome', 'value', 'Maria'))),
+    jsonb_build_object('stepId', coalesce(p_step, 'fim'), 'answers', jsonb_build_array(jsonb_build_object('key', 'nome', 'label', 'Nome', 'value', 'Maria'))),
     p_reason, v_outputs);
   PERFORM pg_temp.unbecome();
   RETURN n;
@@ -297,7 +297,7 @@ SELECT is(pg_temp.app_value(pg_temp.id('a_att'), pg_temp.fill('(SELECT changed F
 SELECT pg_temp.inbound('m5', 'conv1', 'a_owner', 'acc_a', '+5511977770001', 31);
 SELECT is((SELECT action || '/' || reason FROM pg_temp.prep('a_owner', 'm5')), 'none/not_eligible', 'em atendimento humano: nada');
 SELECT is(
-  pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_sessions WHERE conversation_id = {conv1} AND state -> ''answers'' ? ''nome'''),
+  pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_sessions WHERE conversation_id = {conv1} AND state -> ''answers'' @> ''[{"key":"nome","value":"Maria"}]'''),
   1::bigint, 'o atendente lê a sessão e os dados coletados');
 SELECT is(pg_temp.sees('b_owner', 'SELECT 1 FROM public.automation_sessions'), 0::bigint, 'outra organização não lê a sessão');
 SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_executions WHERE session_id = {sess1}'), 3::bigint,

@@ -78,10 +78,10 @@ test("reserva completa: coleta nome e pessoas, avisa que depende de confirmaçã
   assert.equal(done.status, "handed_off");
   assert.equal(done.reason, "handoff_step");
   assert.match(texts(done)[0]!, /só vale depois da confirmação/);
-  assert.deepEqual(done.state.answers, {
-    nome: { label: "Nome", value: "Maria Exemplo" },
-    pessoas: { label: "Pessoas", value: "4" },
-  });
+  assert.deepEqual(done.state.answers, [
+    { key: "nome", label: "Nome", value: "Maria Exemplo" },
+    { key: "pessoas", label: "Pessoas", value: "4" },
+  ]);
 });
 
 test("evento: três perguntas e encerramento próprio do encaminhamento", () => {
@@ -89,13 +89,13 @@ test("evento: três perguntas e encerramento próprio do encaminhamento", () => 
   const done = results.at(-1)!;
   assert.equal(done.status, "handed_off");
   assert.match(texts(done).join(" "), /equipe de eventos/);
-  assert.deepEqual(Object.keys(done.state.answers), ["nome", "convidados", "data"]);
+  assert.deepEqual(done.state.answers.map((answer) => answer.key), ["nome", "convidados", "data"], "na ordem da coleta");
 });
 
 test("fornecedor: coleta oferta, empresa e telefone e encaminha", () => {
   const done = play(demo, [text("sou fornecedor"), text("Hortifrúti orgânico"), text("Sítio Exemplo"), text("+55 11 90000-0000")]).at(-1)!;
   assert.equal(done.status, "handed_off");
-  assert.equal(done.state.answers.empresa.value, "Sítio Exemplo");
+  assert.equal(done.state.answers.find((answer) => answer.key === "empresa")?.value, "Sítio Exemplo");
 });
 
 test("informações: responde e volta ao mesmo menu, sem empilhar", () => {
@@ -149,7 +149,7 @@ test("pergunta: resposta fora do tamanho é inválida; 'atendente' só encaminha
 
   const freeText = play(demo, [text("3"), text("Atendimento com atendente dedicado")]).at(-1)!;
   assert.equal(freeText.status, "active");
-  assert.equal(freeText.state.answers.oferta.value, "Atendimento com atendente dedicado");
+  assert.equal(freeText.state.answers[0].value, "Atendimento com atendente dedicado");
 
   const asks = play(demo, [text("3"), text("Atendente")]).at(-1)!;
   assert.equal(asks.status, "handed_off");
@@ -160,7 +160,7 @@ test("pedido de atendente a qualquer momento, inclusive no meio de uma coleta", 
   const done = play(demo, [text("1"), text("cafe"), text("Maria"), text("humano")]).at(-1)!;
   assert.equal(done.status, "handed_off");
   assert.equal(done.reason, "human_requested");
-  assert.equal(done.state.answers.nome.value, "Maria", "o que já foi coletado vai junto");
+  assert.deepEqual(done.state.answers, [{ key: "nome", label: "Nome", value: "Maria" }], "o que já foi coletado vai junto");
 });
 
 test("sem atendimento humano: avisa e volta ao menu, nunca encaminha", () => {

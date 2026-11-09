@@ -1,5 +1,7 @@
 import type { BadgeTone } from "@/components/ui/badge";
 import type {
+  AutomationFlowStatus,
+  AutomationSessionStatus,
   ConversationEventType,
   ConversationStatus,
   MemberRole,
@@ -92,7 +94,7 @@ export const conversationStatusFilterLabel: Record<ConversationStatusFilter, str
 /** Remetente de uma mensagem — nunca resolvido para o nome do atendente (evita expor identificadores). */
 export const messageSenderLabel: Record<MessageSender, string> = {
   contact: "Contato",
-  bot: "Bot",
+  bot: "Automação",
   user: "Atendente",
   system: "Sistema",
 };
@@ -111,4 +113,49 @@ export const conversationEventLabel: Record<ConversationEventType, string> = {
   assigned: "assumiu o atendimento",
   resolved: "resolveu o atendimento",
   reopened: "Nova mensagem do cliente reabriu a conversa",
+  automation_started: "A automação começou a responder",
+  handed_off: "A automação passou a conversa para a equipe",
+};
+
+/** Eventos sem usuário, descritos por inteiro (quem agiu foi o cliente ou a automação). */
+export const conversationEventWithoutUserLabel: Partial<Record<ConversationEventType, string>> = {
+  reopened: conversationEventLabel.reopened,
+  automation_started: conversationEventLabel.automation_started,
+  handed_off: conversationEventLabel.handed_off,
+  // bot -> resolved só acontece pela conclusão da automação (0010).
+  resolved: "A automação concluiu o atendimento",
+};
+
+/** Situação de uma sessão de automação, como o atendente a vê. */
+export const automationSessionStatusLabel: Record<AutomationSessionStatus, string> = {
+  active: "Em andamento",
+  handed_off: "Encaminhada para a equipe",
+  completed: "Concluída",
+  interrupted: "Interrompida",
+  failed: "Falhou",
+};
+
+export const automationFlowStatusLabel: Record<AutomationFlowStatus, string> = {
+  draft: "Rascunho",
+  active: "Ativo",
+  paused: "Pausado",
+};
+
+export const automationFlowStatusTone: Record<AutomationFlowStatus, BadgeTone> = {
+  draft: "zinc",
+  active: "green",
+  paused: "amber",
+};
+
+/** Motivo do fim de uma sessão (`automation_sessions.end_reason`). */
+export const automationEndReasonLabel: Record<string, string> = {
+  flow_end: "fim do fluxo",
+  handoff_step: "etapa de encaminhamento",
+  human_requested: "cliente pediu atendente",
+  invalid_attempts: "respostas inválidas seguidas",
+  turn_limit: "limite de respostas da sessão",
+  handoff_unavailable: "sem atendimento humano",
+  human_takeover: "atendente assumiu",
+  module_disabled: "módulo Automações desligado",
+  flow_paused: "fluxo pausado",
 };

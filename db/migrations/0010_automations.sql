@@ -95,11 +95,12 @@ create table public.automation_flow_versions (
     foreign key (organization_id, flow_id)
     references public.automation_flows (organization_id, id)
     on delete cascade,
-  -- Quem publicou é membro da organização; o vínculo não some enquanto houver versão.
+  -- Quem publicou é membro da organização; o vínculo não some enquanto houver
+  -- versão. NO ACTION (conferido no fim do comando), não RESTRICT: excluir a
+  -- organização inteira remove vínculos e versões no mesmo comando.
   constraint automation_flow_versions_published_by_fkey
     foreign key (organization_id, published_by)
-    references public.organization_members (organization_id, user_id)
-    on delete restrict,
+    references public.organization_members (organization_id, user_id),
   constraint automation_flow_versions_version_key unique (flow_id, version),
   constraint automation_flow_versions_org_flow_id_key unique (organization_id, flow_id, id),
   constraint automation_flow_versions_version_positive check (version > 0),

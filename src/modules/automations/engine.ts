@@ -31,9 +31,15 @@ export type SessionState = {
   invalidAttempts: number;
   /** Respostas do cliente nesta sessão. */
   turns: number;
-  /** Dados coletados pelas perguntas, com o rótulo que o atendente vê. */
-  answers: Record<string, { label: string; value: string }>;
+  /**
+   * Dados coletados pelas perguntas, na ordem em que foram respondidos, com o
+   * rótulo que o atendente vê. Lista (não objeto): o JSONB reordena chaves.
+   * Responder de novo a mesma variável substitui o valor.
+   */
+  answers: CollectedAnswer[];
 };
+
+export type CollectedAnswer = { key: string; label: string; value: string };
 
 /** Resposta do cliente. `selection` é a linha escolhida numa lista interativa (id estável). */
 export type EngineInput = { type: "text"; text: string } | { type: "selection"; optionId: string };
@@ -106,7 +112,7 @@ function initialState(definition: FlowDefinition): SessionState {
     menuStack: [],
     invalidAttempts: 0,
     turns: 1,
-    answers: {},
+    answers: [],
   };
 }
 
@@ -288,7 +294,10 @@ function answerQuestion(turn: Turn, question: QuestionStep, input: EngineInput):
   if (value.length < question.minLength || value.length > question.maxLength) return invalid(turn, question);
   turn.state = {
     ...turn.state,
-    answers: { ...turn.state.answers, [question.variable]: { label: question.label, value } },
+    answers: [
+      ...turn.state.answers.filter((answer) => answer.key !== question.variable),
+      { key: question.variable, label: question.label, value },
+    ],
   };
   return runFrom(turn, question.next);
 }
@@ -346,12 +355,12 @@ export function isSessionState(value: unknown): value is SessionState {
     state.menuStack.every((item) => typeof item === "string") &&
     Number.isInteger(state.invalidAttempts) &&
     Number.isInteger(state.turns) &&
-    typeof state.answers === "object" &&
-    state.answers !== null &&
-    Object.values(state.answers).every(
+    Array.isArray(state.answers) &&
+    state.answers.every(
       (answer) =>
         typeof answer === "object" &&
         answer !== null &&
+        typeof (answer as Record<string, unknown>).key === "string" &&
         typeof (answer as Record<string, unknown>).label === "string" &&
         typeof (answer as Record<string, unknown>).value === "string",
     )
