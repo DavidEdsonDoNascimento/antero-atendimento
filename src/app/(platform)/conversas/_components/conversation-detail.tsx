@@ -108,7 +108,7 @@ export function ConversationDetailPanel({
             Canal de desenvolvimento: mensagens simuladas, nada é enviado ao WhatsApp.
           </p>
         )}
-        <AttendanceControls key={`${detail.id}:${detail.status}`} conversationId={detail.id} actions={actions} />
+        <AttendanceControls key={detail.id} conversationId={detail.id} actions={actions} />
         <AttendanceLog events={events} viewerId={viewer.userId} />
       </div>
 
