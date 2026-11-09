@@ -105,3 +105,27 @@ Só existe em desenvolvimento e testes, em três camadas:
 
 Sem WebSocket: as ações revalidam `/conversas`, e a Inbox pede os dados de novo a
 cada 15 s com a aba visível (`AutoRefresh`), preservando o texto em edição.
+
+## Pendências conhecidas (fora da E2A)
+
+Decisões deixadas de propósito; nenhuma tem tratamento hoje.
+
+1. **Mensagens `pending` depois de falha.** O envio é em duas fases (gravar
+   `pending`, enviar, gravar o resultado). Se o processo cair, ou o resultado não
+   puder ser gravado, entre a fase 1 e a 3, a mensagem fica `pending` ("Enviando…"
+   na tela) para sempre: nada a reenvia nem a marca como `failed`. Também não há
+   nova tentativa automática para `failed`; o atendente escreve de novo, com outra
+   chave. O reprocessamento é do worker (E2B), que também passa a gravar
+   `sent/delivered/read/failed` dos canais reais por papel próprio — hoje
+   `record_outbound_result` só atende canais `development`, chamado pelo usuário.
+2. **Transferência entre atendentes.** Não existe. `claim_conversation` recusa
+   (`AT001`) conversa com outro responsável, nem owner/admin toma a conversa, e o
+   responsável só muda quando a conversa é resolvida e reaberta pelo cliente.
+   Decidir o fluxo (quem pode transferir, para quem, o que o registro mostra) e
+   acrescentar um tipo de evento em migration própria.
+3. **Responsável desativado.** Se o vínculo do responsável vira `disabled`, a
+   conversa continua `human` e atribuída a ele: ninguém assume nem responde (`AT001`/
+   `AT003`), e só owner/admin consegue resolvê-la. A tela mostra "Membro sem vínculo
+   ativo" (a RLS oculta o perfil), e `organization_members` não pode ser apagado
+   enquanto referenciado. Decidir se a desativação libera as conversas dele
+   (voltando a `waiting`) ou se o owner/admin as reatribui, junto com o item 2.
