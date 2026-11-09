@@ -145,9 +145,8 @@ create table public.automation_sessions (
   -- Estado do motor (etapa, pilha de menus, tentativas, respostas coletadas).
   state jsonb not null,
   revision integer not null default 1,
-  -- Mensagem recebida mais recente já processada: ordem e mensagens atrasadas.
+  -- Última mensagem recebida processada: as pendentes são as de arrival_order maior.
   last_message_id uuid not null,
-  last_message_at timestamptz not null,
   end_reason text,
   started_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -212,6 +211,16 @@ create index automation_executions_session_idx
 alter table public.messages
   add column payload jsonb,
   add column automation_execution_id uuid;
+
+-- Ordem de gravação das mensagens. A ingestão trava a conversa antes do INSERT
+-- (0005), então, numa mesma conversa, arrival_order segue a ordem em que as
+-- mensagens foram gravadas — created_at não serve, porque é o início da
+-- transação e duas ingestões simultâneas podem tê-lo em ordem inversa.
+alter table public.messages
+  add column arrival_order bigint generated always as identity;
+
+create index messages_conversation_arrival_idx
+  on public.messages (conversation_id, arrival_order);
 
 alter table public.messages
   add constraint messages_automation_execution_fkey
@@ -576,9 +585,17 @@ begin
 end;
 $$;
 
--- O que fazer com esta mensagem recebida: nada (`none`, com o motivo), iniciar
--- uma sessão (`start`) ou avançar a sessão ativa (`advance`). Trava a conversa;
--- chamada na mesma transação do commit, a decisão vale até o COMMIT.
+-- O que fazer agora na conversa desta mensagem recebida: nada (`none`, com o
+-- motivo), iniciar uma sessão (`start`) ou avançar a sessão ativa (`advance`).
+-- Trava a conversa; chamada na mesma transação do commit, a decisão vale até o
+-- COMMIT.
+--
+-- Ordem: a entrada é sempre a mensagem PENDENTE mais antiga da sessão (sem
+-- execução, depois da última processada), em `messages.arrival_order` — a ordem
+-- em que a ingestão gravou, com a conversa travada. Quem obtém a trava primeiro
+-- processa a mais antiga, seja de quem for o pedido; `input_message_id` diz qual.
+-- Assim uma resposta mais nova nunca ocupa a pergunta da anterior e nenhuma
+-- mensagem válida fica para trás.
 create function public.automation_prepare_internal(p_message_id uuid)
 returns table (
   action text,
@@ -592,7 +609,8 @@ returns table (
   definition jsonb,
   state jsonb,
   message_content text,
-  attendance_enabled boolean
+  attendance_enabled boolean,
+  input_message_id uuid
 )
 language plpgsql
 security definer
@@ -603,13 +621,15 @@ declare
   v_message record;
   v_conversation record;
   v_session record;
+  v_input record;
   v_flow record;
   v_automation boolean;
   v_attendance boolean;
   v_channel_connected boolean;
   v_cycle_start timestamptz;
+  v_reason text;
 begin
-  select m.organization_id, m.conversation_id, m.whatsapp_account_id, m.created_at, m.content, m.direction
+  select m.organization_id, m.conversation_id, m.whatsapp_account_id, m.arrival_order, m.content, m.direction
     into v_message
   from public.messages m
   where m.id = p_message_id;
@@ -630,138 +650,124 @@ begin
     select 1 from public.organizations o
     where o.id = v_message.organization_id and o.status = 'active'
   ) then
-    return query select 'none', 'organization_inactive', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
+    v_reason := 'organization_inactive';
+  else
+    select exists (
+             select 1 from public.organization_modules om
+             where om.organization_id = v_message.organization_id and om.module = 'automacoes' and om.enabled
+           ),
+           exists (
+             select 1 from public.organization_modules om
+             where om.organization_id = v_message.organization_id and om.module = 'atendimento' and om.enabled
+           ),
+           exists (
+             select 1 from public.whatsapp_accounts w
+             where w.organization_id = v_message.organization_id
+               and w.id = v_message.whatsapp_account_id
+               and w.status = 'connected'
+           )
+      into v_automation, v_attendance, v_channel_connected;
 
-  if exists (select 1 from public.automation_executions e where e.message_id = p_message_id) then
-    return query select 'none', 'already_processed', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
-
-  select exists (
-           select 1 from public.organization_modules om
-           where om.organization_id = v_message.organization_id and om.module = 'automacoes' and om.enabled
-         ),
-         exists (
-           select 1 from public.organization_modules om
-           where om.organization_id = v_message.organization_id and om.module = 'atendimento' and om.enabled
-         ),
-         exists (
-           select 1 from public.whatsapp_accounts w
-           where w.organization_id = v_message.organization_id
-             and w.id = v_message.whatsapp_account_id
-             and w.status = 'connected'
-         )
-    into v_automation, v_attendance, v_channel_connected;
-
-  select s.id, s.revision, s.flow_id, s.flow_version_id, s.state, s.last_message_id, s.last_message_at,
-         f.status as flow_status, v.definition
-    into v_session
-  from public.automation_sessions s
-  join public.automation_flows f on f.organization_id = s.organization_id and f.id = s.flow_id
-  join public.automation_flow_versions v on v.organization_id = s.organization_id and v.id = s.flow_version_id
-  where s.organization_id = v_message.organization_id
-    and s.conversation_id = v_message.conversation_id
-    and s.status = 'active'
-  for update of s;
-
-  if found then
-    if not v_automation then
-      perform public.automation_interrupt_internal(p_message_id, v_session.id, 'module_disabled');
-      return query select 'none', 'module_disabled', v_message.organization_id, v_message.conversation_id,
-        v_session.id, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-      return;
-    end if;
-    if v_session.flow_status <> 'active' then
-      perform public.automation_interrupt_internal(p_message_id, v_session.id, 'flow_paused');
-      return query select 'none', 'flow_paused', v_message.organization_id, v_message.conversation_id,
-        v_session.id, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-      return;
-    end if;
-    if not v_channel_connected or v_conversation.status <> 'bot' then
-      return query select 'none', case when v_channel_connected then 'not_eligible' else 'channel_unavailable' end,
-        v_message.organization_id, v_message.conversation_id,
-        v_session.id, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-      return;
-    end if;
-    -- Mensagem anterior (ou igual) à última processada: chegou atrasada.
-    if (v_message.created_at, p_message_id) <= (v_session.last_message_at, v_session.last_message_id) then
-      return query select 'none', 'stale', v_message.organization_id, v_message.conversation_id,
-        v_session.id, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-      return;
-    end if;
-    return query select 'advance', null::text, v_message.organization_id, v_message.conversation_id,
-      v_session.id, v_session.revision, v_session.flow_id, v_session.flow_version_id, v_session.definition,
-      v_session.state, v_message.content, v_attendance;
-    return;
-  end if;
-
-  -- Sem sessão ativa: só começa numa conversa aguardando, sem responsável, na
-  -- primeira mensagem do ciclo (conversa nova ou reaberta) e se o ciclo ainda
-  -- não teve sessão — depois de um encaminhamento a conversa espera a equipe.
-  if not v_automation then
-    return query select 'none', 'module_disabled', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
-  if v_conversation.status <> 'waiting' or v_conversation.assigned_user_id is not null then
-    return query select 'none', 'not_eligible', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
-
-  select greatest(v_conversation.started_at, max(e.created_at))
-    into v_cycle_start
-  from public.conversation_events e
-  where e.organization_id = v_message.organization_id
-    and e.conversation_id = v_message.conversation_id
-    and e.event_type = 'reopened';
-  v_cycle_start := coalesce(v_cycle_start, v_conversation.started_at);
-
-  if exists (
-    select 1 from public.automation_sessions s
+    select s.id, s.revision, s.flow_id, s.flow_version_id, s.state, s.last_message_id,
+           f.status as flow_status, v.definition
+      into v_session
+    from public.automation_sessions s
+    join public.automation_flows f on f.organization_id = s.organization_id and f.id = s.flow_id
+    join public.automation_flow_versions v on v.organization_id = s.organization_id and v.id = s.flow_version_id
     where s.organization_id = v_message.organization_id
       and s.conversation_id = v_message.conversation_id
-      and s.started_at >= v_cycle_start
-  ) or exists (
-    select 1 from public.messages m
-    where m.organization_id = v_message.organization_id
-      and m.conversation_id = v_message.conversation_id
-      and m.direction = 'inbound'
-      and m.created_at >= v_cycle_start
-      and (m.created_at, m.id) < (v_message.created_at, p_message_id)
-  ) then
-    return query select 'none', 'not_eligible', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
+      and s.status = 'active'
+    for update of s;
+
+    if found then
+      select m.id, m.content
+        into v_input
+      from public.messages m
+      where m.organization_id = v_message.organization_id
+        and m.conversation_id = v_message.conversation_id
+        and m.direction = 'inbound'
+        and m.arrival_order > (select lm.arrival_order from public.messages lm where lm.id = v_session.last_message_id)
+        and not exists (select 1 from public.automation_executions e where e.message_id = m.id)
+      order by m.arrival_order
+      limit 1;
+
+      if not found then
+        v_reason := 'already_processed';
+      elsif not v_automation then
+        perform public.automation_interrupt_internal(v_input.id, v_session.id, 'module_disabled');
+        v_reason := 'module_disabled';
+      elsif v_session.flow_status <> 'active' then
+        perform public.automation_interrupt_internal(v_input.id, v_session.id, 'flow_paused');
+        v_reason := 'flow_paused';
+      elsif not v_channel_connected then
+        v_reason := 'channel_unavailable';
+      elsif v_conversation.status <> 'bot' then
+        v_reason := 'not_eligible';
+      else
+        return query select 'advance', null::text, v_message.organization_id, v_message.conversation_id,
+          v_session.id, v_session.revision, v_session.flow_id, v_session.flow_version_id, v_session.definition,
+          v_session.state, v_input.content, v_attendance, v_input.id;
+        return;
+      end if;
+
+    -- Sem sessão ativa: só começa numa conversa aguardando, sem responsável, na
+    -- primeira mensagem do ciclo (conversa nova ou reaberta) e se o ciclo ainda
+    -- não teve sessão — depois de um encaminhamento a conversa espera a equipe.
+    -- As mensagens que chegarem junto com a primeira são a fila da sessão nova.
+    elsif exists (select 1 from public.automation_executions e where e.message_id = p_message_id) then
+      v_reason := 'already_processed';
+    elsif not v_automation then
+      v_reason := 'module_disabled';
+    elsif v_conversation.status <> 'waiting' or v_conversation.assigned_user_id is not null then
+      v_reason := 'not_eligible';
+    else
+      select greatest(v_conversation.started_at, max(e.created_at))
+        into v_cycle_start
+      from public.conversation_events e
+      where e.organization_id = v_message.organization_id
+        and e.conversation_id = v_message.conversation_id
+        and e.event_type = 'reopened';
+      v_cycle_start := coalesce(v_cycle_start, v_conversation.started_at);
+
+      if exists (
+        select 1 from public.automation_sessions s
+        where s.organization_id = v_message.organization_id
+          and s.conversation_id = v_message.conversation_id
+          and s.started_at >= v_cycle_start
+      ) or exists (
+        select 1 from public.messages m
+        where m.organization_id = v_message.organization_id
+          and m.conversation_id = v_message.conversation_id
+          and m.direction = 'inbound'
+          and m.created_at >= v_cycle_start
+          and m.arrival_order < v_message.arrival_order
+      ) then
+        v_reason := 'not_eligible';
+      elsif not v_channel_connected then
+        v_reason := 'channel_unavailable';
+      else
+        select f.id, f.published_version_id, v.definition
+          into v_flow
+        from public.automation_flows f
+        join public.automation_flow_versions v on v.organization_id = f.organization_id and v.id = f.published_version_id
+        where f.organization_id = v_message.organization_id
+          and f.is_entry
+          and f.status = 'active';
+
+        if not found then
+          v_reason := 'no_flow';
+        else
+          return query select 'start', null::text, v_message.organization_id, v_message.conversation_id,
+            null::uuid, null::integer, v_flow.id, v_flow.published_version_id, v_flow.definition,
+            null::jsonb, v_message.content, v_attendance, p_message_id;
+          return;
+        end if;
+      end if;
+    end if;
   end if;
 
-  if not v_channel_connected then
-    return query select 'none', 'channel_unavailable', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
-
-  select f.id, f.published_version_id, v.definition
-    into v_flow
-  from public.automation_flows f
-  join public.automation_flow_versions v on v.organization_id = f.organization_id and v.id = f.published_version_id
-  where f.organization_id = v_message.organization_id
-    and f.is_entry
-    and f.status = 'active';
-
-  if not found then
-    return query select 'none', 'no_flow', v_message.organization_id, v_message.conversation_id,
-      null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean;
-    return;
-  end if;
-
-  return query select 'start', null::text, v_message.organization_id, v_message.conversation_id,
-    null::uuid, null::integer, v_flow.id, v_flow.published_version_id, v_flow.definition,
-    null::jsonb, v_message.content, v_attendance;
+  return query select 'none', v_reason, v_message.organization_id, v_message.conversation_id,
+    null::uuid, null::integer, null::uuid, null::uuid, null::jsonb, null::jsonb, null::text, null::boolean, null::uuid;
 end;
 $$;
 
@@ -813,7 +819,9 @@ begin
     raise exception 'antero_automation: not_eligible: %', v_plan.reason
       using errcode = 'AU006';
   end if;
-  if (v_plan.action = 'start' and (p_session_id is not null or p_flow_version_id is distinct from v_plan.flow_version_id))
+  -- A entrada tem de ser a que o prepare escolheria agora (a pendente mais antiga).
+  if v_plan.input_message_id is distinct from p_message_id
+     or (v_plan.action = 'start' and (p_session_id is not null or p_flow_version_id is distinct from v_plan.flow_version_id))
      or (v_plan.action = 'advance' and (p_session_id is distinct from v_plan.session_id
          or p_expected_revision is distinct from v_plan.session_revision
          or p_flow_version_id is distinct from v_plan.flow_version_id)) then
@@ -851,11 +859,11 @@ begin
   if v_plan.action = 'start' then
     insert into public.automation_sessions (
       organization_id, conversation_id, flow_id, flow_version_id, status, current_step_id, state,
-      last_message_id, last_message_at
+      last_message_id
     )
     values (
       v_plan.organization_id, v_plan.conversation_id, v_plan.flow_id, v_plan.flow_version_id, 'active',
-      p_step_id, p_state, p_message_id, v_message.created_at
+      p_step_id, p_state, p_message_id
     )
     returning id into v_session_id;
 
@@ -912,7 +920,6 @@ begin
       state = p_state,
       revision = s.revision + case when v_plan.action = 'start' then 0 else 1 end,
       last_message_id = p_message_id,
-      last_message_at = v_message.created_at,
       end_reason = p_reason,
       ended_at = case when p_status = 'active' then null else now() end
   where s.id = v_session_id;
@@ -993,6 +1000,67 @@ begin
 end;
 $$;
 
+-- Imediatamente antes de enviar uma resposta da automação (fase 2): ela ainda
+-- pode sair? Exige organização ativa, módulo Automações habilitado, canal
+-- conectado e conversa que não esteja com um atendente. Se não puder, a resposta
+-- é marcada `failed` (nunca é enviada) e a função devolve false. Assim desligar
+-- o módulo, pausar o canal ou um atendente assumir entre o commit e o envio
+-- impede o que ainda não saiu. Organização suspensa nem chega aqui pela porta de
+-- desenvolvimento (is_org_admin), e a resposta fica sem envio.
+create function public.automation_begin_delivery_internal(p_message_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_message record;
+  v_allowed boolean;
+begin
+  select m.organization_id, m.conversation_id, m.whatsapp_account_id, m.delivery_status
+    into v_message
+  from public.messages m
+  where m.id = p_message_id
+    and m.sender_type = 'bot'
+    and m.automation_execution_id is not null
+  for update;
+
+  if not found then
+    raise exception 'antero_automation: message_not_found: resposta da automação inexistente'
+      using errcode = 'P0002';
+  end if;
+  if v_message.delivery_status <> 'pending' then
+    return false;
+  end if;
+
+  select exists (select 1 from public.organizations o where o.id = v_message.organization_id and o.status = 'active')
+     and exists (
+       select 1 from public.organization_modules om
+       where om.organization_id = v_message.organization_id and om.module = 'automacoes' and om.enabled
+     )
+     and exists (
+       select 1 from public.whatsapp_accounts w
+       where w.organization_id = v_message.organization_id
+         and w.id = v_message.whatsapp_account_id
+         and w.status = 'connected'
+     )
+     and exists (
+       select 1 from public.conversations c
+       where c.organization_id = v_message.organization_id
+         and c.id = v_message.conversation_id
+         and c.status <> 'human'
+     )
+    into v_allowed;
+
+  if not v_allowed then
+    update public.messages m
+    set delivery_status = 'failed'
+    where m.id = p_message_id;
+  end if;
+  return v_allowed;
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- Porta de DESENVOLVIMENTO (simulador). Mesmas regras da ingestão simulada:
 -- usuário autenticado, owner/admin ativo da organização da mensagem
@@ -1051,7 +1119,8 @@ returns table (
   definition jsonb,
   state jsonb,
   message_content text,
-  attendance_enabled boolean
+  attendance_enabled boolean,
+  input_message_id uuid
 )
 language plpgsql
 security definer
@@ -1112,6 +1181,18 @@ begin
 end;
 $$;
 
+create function public.dev_automation_begin_delivery(p_message_id uuid)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  perform public.assert_dev_automation_access(p_message_id);
+  return public.automation_begin_delivery_internal(p_message_id);
+end;
+$$;
+
 revoke all on function public.prevent_automation_version_update() from public;
 revoke all on function public.stop_automation_on_conversation_change() from public;
 revoke all on function public.assert_automation_admin(uuid) from public;
@@ -1123,6 +1204,8 @@ revoke all on function public.automation_interrupt_internal(uuid, uuid, text) fr
 revoke all on function public.automation_prepare_internal(uuid) from public;
 revoke all on function public.automation_commit_internal(uuid, uuid, integer, uuid, public.automation_session_status, text, jsonb, text, jsonb) from public;
 revoke all on function public.automation_record_delivery_internal(uuid, public.message_delivery_status, text) from public;
+revoke all on function public.automation_begin_delivery_internal(uuid) from public;
+revoke all on function public.dev_automation_begin_delivery(uuid) from public;
 revoke all on function public.assert_dev_automation_access(uuid) from public;
 revoke all on function public.dev_automation_prepare(uuid) from public;
 revoke all on function public.dev_automation_commit(uuid, uuid, integer, uuid, public.automation_session_status, text, jsonb, text, jsonb) from public;
@@ -1134,6 +1217,7 @@ grant execute on function public.set_automation_flow_status(uuid, uuid, public.a
 grant execute on function public.dev_automation_prepare(uuid) to antero_app;
 grant execute on function public.dev_automation_commit(uuid, uuid, integer, uuid, public.automation_session_status, text, jsonb, text, jsonb) to antero_app;
 grant execute on function public.dev_automation_record_delivery(uuid, public.message_delivery_status, text) to antero_app;
+grant execute on function public.dev_automation_begin_delivery(uuid) to antero_app;
 
 -- migrate:down
 -- Recusa-se se houver fluxo, sessão ou resposta da automação: reverter apagaria
@@ -1148,10 +1232,12 @@ begin
 end;
 $$;
 
+drop function public.dev_automation_begin_delivery(uuid);
 drop function public.dev_automation_record_delivery(uuid, public.message_delivery_status, text);
 drop function public.dev_automation_commit(uuid, uuid, integer, uuid, public.automation_session_status, text, jsonb, text, jsonb);
 drop function public.dev_automation_prepare(uuid);
 drop function public.assert_dev_automation_access(uuid);
+drop function public.automation_begin_delivery_internal(uuid);
 drop function public.automation_record_delivery_internal(uuid, public.message_delivery_status, text);
 drop function public.automation_commit_internal(uuid, uuid, integer, uuid, public.automation_session_status, text, jsonb, text, jsonb);
 drop function public.automation_prepare_internal(uuid);
@@ -1197,6 +1283,8 @@ alter table public.conversation_events
     and (event_type <> 'reopened' or user_id is null)
   );
 
+drop index public.messages_conversation_arrival_idx;
+alter table public.messages drop column arrival_order;
 drop index public.messages_automation_execution_idx;
 alter table public.messages
   drop constraint messages_rich_type_has_payload,

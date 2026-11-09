@@ -35,6 +35,7 @@ SELECT set_eq(
     'automation_interrupt_internal(uuid,uuid,text)', 'automation_prepare_internal(uuid)',
     'automation_commit_internal(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
     'automation_record_delivery_internal(uuid,message_delivery_status,text)',
+    'automation_begin_delivery_internal(uuid)', 'dev_automation_begin_delivery(uuid)',
     'assert_dev_automation_access(uuid)', 'dev_automation_prepare(uuid)',
     'dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
     'dev_automation_record_delivery(uuid,message_delivery_status,text)'
@@ -80,7 +81,8 @@ SELECT set_eq(
     'public.save_automation_flow(uuid,text,text,jsonb,boolean)', 'public.publish_automation_flow(uuid,uuid,integer)',
     'public.set_automation_flow_status(uuid,uuid,automation_flow_status)', 'public.dev_automation_prepare(uuid)',
     'public.dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
-    'public.dev_automation_record_delivery(uuid,message_delivery_status,text)'
+    'public.dev_automation_record_delivery(uuid,message_delivery_status,text)',
+    'public.dev_automation_begin_delivery(uuid)'
   ],
   'antero_app executa exatamente as funções necessárias (gatilhos e set_updated_at fora)'
 );

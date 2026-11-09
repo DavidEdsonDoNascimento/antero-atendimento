@@ -12,7 +12,7 @@
 -- A disputa real entre duas conexões está em tests/db/automations.test.ts.
 BEGIN;
 \ir lib/helpers.psql
-SELECT plan(98);
+SELECT plan(110);
 
 INSERT INTO public.organizations (name, slug) VALUES
   ('Org A', 'org-a-100'), ('Org B', 'org-b-100'), ('Org C', 'org-c-100');
@@ -64,7 +64,7 @@ $$;
 
 CREATE FUNCTION pg_temp.prep(p_user text, p_msg text)
 RETURNS TABLE (action text, reason text, session_id uuid, session_revision integer, flow_version_id uuid,
-               attendance boolean, step text, version_entry text)
+               attendance boolean, step text, version_entry text, input uuid)
 LANGUAGE plpgsql AS $$
 DECLARE
   v_user uuid := pg_temp.id(p_user);
@@ -74,7 +74,7 @@ BEGIN
   PERFORM pg_temp.become('antero_app', v_user);
   RETURN QUERY
   SELECT p.action, p.reason, p.session_id, p.session_revision, p.flow_version_id, p.attendance_enabled,
-         p.state ->> 'stepId', p.definition ->> 'entryStepId'
+         p.state ->> 'stepId', p.definition ->> 'entryStepId', p.input_message_id
   FROM public.dev_automation_prepare(v_msg) p;
   PERFORM pg_temp.unbecome();
 END;
@@ -87,7 +87,8 @@ INSERT INTO outputs VALUES
   ('one', '[{"message_type":"text","content":"Certo!","payload":{"type":"text","text":"Certo!"}}]'),
   ('none', '[]');
 
--- Prepara e grava o resultado como o servidor faria; devolve quantas respostas saíram.
+-- Prepara e grava o resultado como o servidor faria (a entrada é a que o prepare
+-- escolheu: a pendente mais antiga); devolve quantas respostas saíram.
 CREATE FUNCTION pg_temp.run(p_user text, p_msg text, p_status text, p_step text, p_reason text, p_outputs text DEFAULT 'one')
 RETURNS integer LANGUAGE plpgsql AS $$
 DECLARE
@@ -101,7 +102,7 @@ BEGIN
   PERFORM pg_temp.become('antero_app', v_user);
   SELECT count(*) INTO n
   FROM public.dev_automation_commit(
-    v_msg, r.session_id, r.session_revision, r.flow_version_id,
+    coalesce(r.input, v_msg), r.session_id, r.session_revision, r.flow_version_id,
     p_status::public.automation_session_status, p_step,
     jsonb_build_object('stepId', coalesce(p_step, 'fim'), 'answers', jsonb_build_array(jsonb_build_object('key', 'nome', 'label', 'Nome', 'value', 'Maria'))),
     p_reason, v_outputs);
@@ -150,7 +151,8 @@ SELECT ok(
   NOT has_function_privilege('antero_app', 'public.automation_prepare_internal(uuid)', 'EXECUTE')
   AND NOT has_function_privilege('antero_app', 'public.automation_commit_internal(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)', 'EXECUTE')
   AND NOT has_function_privilege('antero_app', 'public.automation_record_delivery_internal(uuid,message_delivery_status,text)', 'EXECUTE')
-  AND NOT has_function_privilege('antero_app', 'public.automation_interrupt_internal(uuid,uuid,text)', 'EXECUTE'),
+  AND NOT has_function_privilege('antero_app', 'public.automation_interrupt_internal(uuid,uuid,text)', 'EXECUTE')
+  AND NOT has_function_privilege('antero_app', 'public.automation_begin_delivery_internal(uuid)', 'EXECUTE'),
   'as funções internas de execução não são executáveis pela aplicação'
 );
 
@@ -267,14 +269,23 @@ SELECT is(pg_temp.run('a_owner', 'm2', 'active', 'pergunta', NULL), 1, 'avança 
 SELECT is((SELECT revision || '/' || current_step_id FROM public.automation_sessions WHERE id = pg_temp.id('sess1')), '2/pergunta',
   'revisão e etapa atualizadas');
 
+-- Rajada: m_late tem created_at ANTERIOR ao de m2, mas foi gravada depois; m3
+-- chega em seguida. A ordem é a de gravação (arrival_order), e a entrada é
+-- sempre a pendente mais antiga, mesmo quando quem pede é o executor de m3.
 SELECT pg_temp.inbound('m_late', 'conv1', 'a_owner', 'acc_a', '+5511977770001', 5);
-SELECT is((SELECT action || '/' || reason FROM pg_temp.prep('a_owner', 'm_late')), 'none/stale',
-  'mensagem mais antiga que a última processada é ignorada');
+SELECT pg_temp.inbound('m3', 'conv1', 'a_owner', 'acc_a', '+5511977770001', 20);
+SELECT is((SELECT action || '/' || (input = pg_temp.id('m_late'))::text FROM pg_temp.prep('a_owner', 'm3')), 'advance/true',
+  'a entrada é a pendente mais antiga pela ordem de gravação, seja de quem for o pedido');
+SELECT throws_ok(
+  pg_temp.as_sql('a_owner', '(SELECT count(*) FROM public.dev_automation_commit({m3}, {sess1}, 2, {ver_a1}, ''active'', ''x'', ''{}'', NULL, ''[]''))'),
+  'AU005', NULL, 'gravar a mais nova antes da pendente mais antiga é recusado');
+SELECT is(pg_temp.run('a_owner', 'm3', 'active', 'pergunta-2', NULL), 1, 'o pedido de m3 processa m_late primeiro');
+SELECT is((SELECT last_message_id FROM public.automation_sessions WHERE id = pg_temp.id('sess1')), pg_temp.id('m_late'),
+  'm_late é a última processada; m3 continua pendente');
 
 -- ---------------------------------------------------------------------------
 -- Encaminhamento humano
 -- ---------------------------------------------------------------------------
-SELECT pg_temp.inbound('m3', 'conv1', 'a_owner', 'acc_a', '+5511977770001', 20);
 SELECT is(pg_temp.run('a_owner', 'm3', 'handed_off', NULL, 'handoff_step'), 1, 'encaminha, com a mensagem de passagem');
 SELECT is(
   (SELECT status::text || '/' || (assigned_user_id IS NULL)::text FROM public.conversations WHERE id = pg_temp.id('conv1')),
@@ -300,8 +311,8 @@ SELECT is(
   pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_sessions WHERE conversation_id = {conv1} AND state -> ''answers'' @> ''[{"key":"nome","value":"Maria"}]'''),
   1::bigint, 'o atendente lê a sessão e os dados coletados');
 SELECT is(pg_temp.sees('b_owner', 'SELECT 1 FROM public.automation_sessions'), 0::bigint, 'outra organização não lê a sessão');
-SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_executions WHERE session_id = {sess1}'), 3::bigint,
-  'execuções: início, avanço e encaminhamento');
+SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.automation_executions WHERE session_id = {sess1}'), 4::bigint,
+  'execuções: início, dois avanços e encaminhamento — uma por mensagem, nenhuma perdida');
 
 -- Resolver e o cliente voltar: novo ciclo, a automação recomeça.
 SELECT is(pg_temp.app_value(pg_temp.id('a_att'), pg_temp.fill('(SELECT changed FROM public.resolve_conversation({org_a}, {conv1}))')), 'true', 'resolve');
@@ -417,11 +428,36 @@ SELECT throws_ok(
   'P0002', NULL, 'record_outbound_result (atendente) não alcança respostas da automação');
 
 -- ---------------------------------------------------------------------------
+-- Trava do envio: entre o commit e o envio, o que mudou impede a saída
+-- ---------------------------------------------------------------------------
+SELECT pg_temp.inbound('d1', 'conv_d', 'a_owner', 'acc_a', '+5511977770011', 0);
+SELECT is(pg_temp.run('a_owner', 'd1', 'active', 'menu', NULL, 'two'), 2, 'duas respostas pendentes');
+INSERT INTO ids SELECT 'd_text', id FROM public.messages WHERE conversation_id = pg_temp.id('conv_d') AND message_type = 'text' AND sender_type = 'bot';
+INSERT INTO ids SELECT 'd_list', id FROM public.messages WHERE conversation_id = pg_temp.id('conv_d') AND message_type = 'interactive';
+SELECT is(pg_temp.app_value(pg_temp.id('a_owner'), pg_temp.fill('public.dev_automation_begin_delivery({d_text})')), 'true',
+  'organização, módulo, canal e conversa em ordem: pode enviar');
+SELECT throws_ok(pg_temp.as_sql('a_att', 'public.dev_automation_begin_delivery({d_text})'), '42501', NULL,
+  'atendente não libera envio da automação');
+UPDATE public.organization_modules SET enabled = false WHERE organization_id = pg_temp.id('org_a') AND module = 'automacoes';
+SELECT is(pg_temp.app_value(pg_temp.id('a_owner'), pg_temp.fill('public.dev_automation_begin_delivery({d_list})')), 'false',
+  'Automações desligado depois do commit: a resposta não sai');
+SELECT is((SELECT delivery_status::text FROM public.messages WHERE id = pg_temp.id('d_list')), 'failed', 'e fica registrada como não enviada');
+UPDATE public.organization_modules SET enabled = true WHERE organization_id = pg_temp.id('org_a') AND module = 'automacoes';
+SELECT is(pg_temp.app_value(pg_temp.id('a_att'), pg_temp.fill('(SELECT changed FROM public.claim_conversation({org_a}, {conv_d}))')), 'true',
+  'atendente assume antes do envio');
+SELECT is(pg_temp.app_value(pg_temp.id('a_owner'), pg_temp.fill('public.dev_automation_begin_delivery({d_text})')), 'false',
+  'conversa com atendente: a resposta do robô não sai');
+
+-- ---------------------------------------------------------------------------
 -- Organização suspensa: nada roda
 -- ---------------------------------------------------------------------------
 SELECT pg_temp.inbound('s1', 'conv_s', 'a_owner', 'acc_a', '+5511977770010', 0);
 UPDATE public.organizations SET status = 'inactive' WHERE id = pg_temp.id('org_a');
 SELECT throws_ok($$SELECT * FROM pg_temp.prep('a_owner', 's1')$$, '42501', NULL, 'suspensa: a porta recusa');
+SELECT throws_ok(pg_temp.as_sql('a_owner', 'public.dev_automation_begin_delivery({bot_msg})'), '42501', NULL,
+  'suspensa: nenhuma resposta pendente é liberada para envio');
+SELECT is(public.automation_begin_delivery_internal(pg_temp.id('bot_msg')), false,
+  'suspensa: a trava interna (futuro worker) também não libera');
 SELECT is((SELECT action || '/' || reason FROM public.automation_prepare_internal(pg_temp.id('s1'))), 'none/organization_inactive',
   'suspensa: a decisão interna (futuro worker) também não age');
 UPDATE public.organizations SET status = 'active' WHERE id = pg_temp.id('org_a');

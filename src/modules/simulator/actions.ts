@@ -43,12 +43,11 @@ const inputSchema = z.object({
 });
 
 const AUTOMATION_NONE: Record<string, string | null> = {
-  already_processed: "Automação: mensagem já processada, nada foi enviado de novo.",
+  already_processed: "Automação: nada pendente — esta mensagem já foi processada (por esta ou por outra execução da fila).",
   module_disabled: "Automação: módulo Automações desabilitado nesta organização (a sessão ativa, se havia, foi interrompida).",
   flow_paused: "Automação: o fluxo foi pausado; a conversa voltou para a equipe.",
   no_flow: "Automação: a organização não tem fluxo de entrada ativo.",
   not_eligible: "Automação: a conversa está com a equipe; o robô não responde.",
-  stale: "Automação: mensagem mais antiga que a última processada, ignorada.",
   channel_unavailable: "Automação: canal desconectado.",
   organization_inactive: "Automação: organização suspensa.",
   execution_error: "Automação: falhou; a mensagem continua gravada.",
@@ -65,7 +64,9 @@ function describeAutomation(result: AutomationRunResult | null): string | null {
   if (!result) return null;
   if (result.action === "none") return AUTOMATION_NONE[result.reason] ?? `Automação: nada a fazer (${result.reason}).`;
   const failed = result.failedDeliveries ? `, ${result.failedDeliveries} com falha de envio` : "";
-  return `${AUTOMATION_STATUS[result.status]} — ${result.sent} mensagem(ns) simulada(s)${failed}.`;
+  const blocked = result.blockedDeliveries ? `, ${result.blockedDeliveries} não enviada(s) (módulo, canal ou atendente)` : "";
+  const burst = result.processed > 1 ? ` (${result.processed} mensagens do cliente processadas em ordem)` : "";
+  return `${AUTOMATION_STATUS[result.status]}${burst} — ${result.sent} mensagem(ns) simulada(s)${failed}${blocked}.`;
 }
 
 const INGEST_REASONS: Record<string, string> = {

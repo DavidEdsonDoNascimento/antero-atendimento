@@ -199,22 +199,29 @@ test("concorrência: a mesma mensagem processada em paralelo executa uma vez só
   assert.equal(Number(executions.count), 1);
 });
 
-test("concorrência: mensagens diferentes simultâneas na mesma conversa se serializam sem avançar errado", async () => {
+test("concorrência: ingestões e execuções simultâneas na mesma conversa processam as duas, na ordem de gravação", async () => {
   const phone = newPhone();
   const { conversationId } = await say(phone, "Oi");
+  // Ingestões em paralelo: a ordem de gravação é decidida pela trava da conversa.
   const [a, b] = await Promise.all([inbound(phone, "1"), inbound(phone, "4")]);
   const runs = await Promise.all([a, b].map((message) => runDevAutomation({ userId: f.users.aOwner }, message.message_id)));
-  const processed = runs.filter((run) => run.action === "advance");
-  assert.ok(processed.length >= 1, JSON.stringify(runs));
   for (const run of runs.filter((candidate) => candidate.action === "none")) {
-    assert.equal(run.reason, "stale", "a única recusa possível é a mensagem que chegou depois de uma mais nova");
+    assert.equal(run.reason, "already_processed", "quem chega depois encontra a fila já processada");
   }
+  const processed = runs.reduce((total, run) => total + (run.action === "none" ? 0 : run.processed), 0);
+  assert.equal(processed, 2, JSON.stringify(runs));
+
+  const order = (
+    await fixture.query("SELECT content FROM public.messages WHERE id = ANY($1::uuid[]) ORDER BY arrival_order", [[a.message_id, b.message_id]])
+  ).rows.map((message) => message.content);
   const session = await row(
-    "SELECT revision, (SELECT count(*) FROM public.automation_executions e WHERE e.session_id = s.id) AS executions FROM public.automation_sessions s WHERE conversation_id = $1",
+    "SELECT revision, current_step_id, (SELECT count(*) FROM public.automation_executions e WHERE e.session_id = s.id) AS executions FROM public.automation_sessions s WHERE conversation_id = $1",
     [conversationId],
   );
-  assert.equal(Number(session.executions), 1 + processed.length, "uma execução por mensagem processada");
-  assert.equal(session.revision, 1 + processed.length, "a revisão avança uma vez por mensagem processada");
+  assert.equal(Number(session.executions), 3, "uma execução por mensagem");
+  assert.equal(session.revision, 3, "a revisão avança uma vez por mensagem");
+  // "1" e depois "4": Reservas → Alterar uma reserva. "4" e depois "1": Informações → Localização.
+  assert.equal(session.current_step_id, order[0] === "1" ? "alterar-nome" : "menu-informacoes", `ordem gravada: ${order.join(", ")}`);
 });
 
 test("sessão sobrevive a reinício da aplicação (pool fechado e reaberto)", async () => {
@@ -394,4 +401,157 @@ test("fora de development/test o executor simulado recusa antes de tocar no banc
   } finally {
     env.NODE_ENV = previous;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Mensagens em sequência rápida. O executor de cada mensagem roda depois da
+// ingestão dela; o de uma mensagem mais nova pode obter a trava da conversa
+// antes do da mais antiga. Os testes forçam essa ordem.
+// ---------------------------------------------------------------------------
+
+const answersOf = async (conversationId: string) =>
+  (await row("SELECT state -> 'answers' AS answers, current_step_id, status FROM public.automation_sessions WHERE conversation_id = $1 ORDER BY started_at DESC LIMIT 1", [conversationId]));
+const unprocessed = async (conversationId: string) =>
+  Number(
+    (
+      await row(
+        `SELECT count(*) FROM public.messages m
+         WHERE m.conversation_id = $1 AND m.direction = 'inbound'
+           AND NOT EXISTS (SELECT 1 FROM public.automation_executions e WHERE e.message_id = m.id)`,
+        [conversationId],
+      )
+    ).count,
+  );
+
+test("rajada numa pergunta: a resposta mais nova processada primeiro não toma o lugar da mais antiga", async () => {
+  const phone = newPhone();
+  const { conversationId } = await say(phone, "Oi");
+  await say(phone, "2"); // eventos → pergunta o nome
+  const first = await inbound(phone, "Ana");
+  const second = await inbound(phone, "80");
+  await runDevAutomation({ userId: f.users.aOwner }, second.message_id);
+  await runDevAutomation({ userId: f.users.aOwner }, first.message_id);
+  const session = await answersOf(conversationId);
+  assert.deepEqual(
+    session.answers.map((answer: { key: string; value: string }) => [answer.key, answer.value]),
+    [["nome", "Ana"], ["convidados", "80"]],
+    "cada resposta na pergunta certa, na ordem de chegada",
+  );
+  assert.equal(session.current_step_id, "eventos-data");
+  assert.equal(await unprocessed(conversationId), 0, "nenhuma mensagem válida ficou sem processar");
+});
+
+test("rajada na abertura: a segunda mensagem não se perde quando chega ao executor antes da primeira", async () => {
+  const phone = newPhone();
+  const first = await inbound(phone, "Oi");
+  const second = await inbound(phone, "4"); // informações
+  await runDevAutomation({ userId: f.users.aOwner }, second.message_id);
+  await runDevAutomation({ userId: f.users.aOwner }, first.message_id);
+  const session = await answersOf(first.conversation_id);
+  assert.equal(session.current_step_id, "menu-informacoes");
+  assert.equal(await unprocessed(first.conversation_id), 0);
+});
+
+test("rajada concorrente: três respostas seguidas, executores em paralelo, coleta íntegra e em ordem", async () => {
+  const phone = newPhone();
+  const { conversationId } = await say(phone, "Oi");
+  await say(phone, "2");
+  const burst = [];
+  for (const content of ["Ana", "80", "20/12"]) burst.push(await inbound(phone, content));
+  const runs = await Promise.all([...burst].reverse().map((message) => runDevAutomation({ userId: f.users.aOwner }, message.message_id)));
+  assert.ok(runs.every((run) => run.action !== "none" || run.reason === "already_processed"), JSON.stringify(runs));
+  const session = await answersOf(conversationId);
+  assert.equal(session.status, "handed_off");
+  assert.deepEqual(
+    session.answers.map((answer: { value: string }) => answer.value),
+    ["Ana", "80", "20/12"],
+  );
+  assert.equal(await unprocessed(conversationId), 0);
+  const replies = await row(
+    "SELECT count(*) FROM public.messages WHERE conversation_id = $1 AND sender_type = 'bot' AND content = 'Qual a data desejada?'",
+    [conversationId],
+  );
+  assert.equal(Number(replies.count), 1, "nenhuma pergunta repetida ou duplicada");
+});
+
+// ---------------------------------------------------------------------------
+// Desligar Automações ou suspender a organização impede respostas pendentes.
+// ---------------------------------------------------------------------------
+
+/** Provedor simulado que executa `onFirstSend` antes do primeiro envio (mudança "durante" o envio). */
+function providerChangingStateOnFirstSend(onFirstSend: () => Promise<void>): { provider: MessagingProvider; sends: () => number } {
+  let sends = 0;
+  const provider: MessagingProvider = {
+    provider: "development",
+    simulated: true,
+    async sendText() {
+      return { ok: true, externalMessageId: `sim-out-${randomUUID()}` };
+    },
+    async send() {
+      sends += 1;
+      if (sends === 1) await onFirstSend();
+      return { ok: true, externalMessageId: `sim-out-${randomUUID()}` };
+    },
+  };
+  return { provider, sends: () => sends };
+}
+
+const botDeliveries = async (conversationId: string) =>
+  (
+    await fixture.query(
+      "SELECT delivery_status::text AS status FROM public.messages WHERE conversation_id = $1 AND sender_type = 'bot' ORDER BY created_at, id",
+      [conversationId],
+    )
+  ).rows.map((message) => message.status);
+
+test("Automações desligado no meio do envio: a resposta seguinte não sai e nada novo é processado", async () => {
+  const phone = newPhone();
+  const message = await inbound(phone, "Oi");
+  const disable = () =>
+    fixture.query("UPDATE public.organization_modules SET enabled = false WHERE organization_id = $1 AND module = 'automacoes'", [f.orgA]).then(() => undefined);
+  const { provider, sends } = providerChangingStateOnFirstSend(disable);
+  try {
+    const run = active(await runDevAutomation({ userId: f.users.aOwner }, message.message_id, { providerFor: () => provider }));
+    assert.equal(sends(), 1, "só a primeira resposta chegou ao provedor");
+    assert.equal(run.sent, 1);
+    assert.equal(run.blockedDeliveries, 1);
+    assert.deepEqual(await botDeliveries(message.conversation_id), ["sent", "failed"]);
+
+    // Mensagens que chegarem depois não são respondidas; a sessão é interrompida.
+    const next = await inbound(phone, "1");
+    assert.deepEqual(await runDevAutomation({ userId: f.users.aOwner }, next.message_id), { action: "none", reason: "module_disabled" });
+    assert.equal(await conversationStatus(message.conversation_id), "waiting");
+    assert.equal((await botDeliveries(message.conversation_id)).length, 2, "nenhuma resposta nova");
+  } finally {
+    await fixture.query("UPDATE public.organization_modules SET enabled = true WHERE organization_id = $1 AND module = 'automacoes'", [f.orgA]);
+  }
+});
+
+test("organização suspensa no meio do envio: nenhuma resposta pendente sai, nada é processado", async () => {
+  const phone = newPhone();
+  const message = await inbound(phone, "Oi");
+  const suspend = () => fixture.query("UPDATE public.organizations SET status = 'inactive' WHERE id = $1", [f.orgA]).then(() => undefined);
+  const { provider, sends } = providerChangingStateOnFirstSend(suspend);
+  try {
+    const run = active(await runDevAutomation({ userId: f.users.aOwner }, message.message_id, { providerFor: () => provider }));
+    assert.equal(sends(), 1, "depois da suspensão, nada mais chega ao provedor");
+    assert.equal(run.blockedDeliveries, 1);
+    // A 1ª saiu antes da suspensão, mas o resultado já não pôde ser gravado: fica `pending`
+    // (limitação conhecida da fase 2; o reprocessamento é do worker, E2B). A 2ª nunca saiu.
+    assert.deepEqual(await botDeliveries(message.conversation_id), ["pending", "pending"]);
+    await assert.rejects(runDevAutomation({ userId: f.users.aOwner }, (await inbound(phone, "1").catch(() => message)).message_id), AccessDeniedError);
+  } finally {
+    await fixture.query("UPDATE public.organizations SET status = 'active' WHERE id = $1", [f.orgA]);
+  }
+});
+
+test("atendente assume entre o commit e o envio: a resposta do robô não sai", async () => {
+  const message = await inbound(newPhone(), "Oi");
+  const claim = () => claimConversation(attendant(), message.conversation_id).then(() => undefined);
+  const { provider, sends } = providerChangingStateOnFirstSend(claim);
+  const run = active(await runDevAutomation({ userId: f.users.aOwner }, message.message_id, { providerFor: () => provider }));
+  assert.equal(sends(), 1);
+  assert.equal(run.blockedDeliveries, 1);
+  assert.deepEqual(await botDeliveries(message.conversation_id), ["sent", "failed"]);
+  assert.equal(await conversationStatus(message.conversation_id), "human");
 });
