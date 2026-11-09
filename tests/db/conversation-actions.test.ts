@@ -295,11 +295,17 @@ test("responder: falha do provedor fica registrada como failed; erro do provedor
     async sendText() {
       return { ok: false, reason: "recusado no teste" };
     },
+    async send() {
+      return { ok: false, reason: "recusado no teste" };
+    },
   };
   const throwing: MessagingProvider = {
     provider: "development",
     simulated: true,
     async sendText() {
+      throw new Error("rede indisponível no teste");
+    },
+    async send() {
       throw new Error("rede indisponível no teste");
     },
   };

@@ -30,3 +30,16 @@ test("provedor simulado aceita e devolve id externo marcado como simulado, únic
 test("cloud_api ainda não tem provedor: erro explícito, sem envio silencioso", () => {
   assert.throws(() => providerFor("cloud_api"), ProviderUnavailableError);
 });
+
+test("provedor simulado aceita as ações da automação (texto, imagem, lista) sem rede", async () => {
+  const { channel, to, idempotencyKey } = message;
+  for (const action of [
+    { type: "text" as const, text: "Olá" },
+    { type: "image" as const, url: "https://exemplo.invalid/a.jpg" },
+    { type: "list" as const, body: "Escolha", button: "Ver", sections: [{ rows: [{ id: "a", title: "A" }] }] },
+  ]) {
+    const result = await simulatedProvider.send({ channel, to, idempotencyKey, action });
+    assert.equal(result.ok, true);
+    if (result.ok) assert.ok(result.externalMessageId.startsWith(SIMULATED_MESSAGE_ID_PREFIX));
+  }
+});
