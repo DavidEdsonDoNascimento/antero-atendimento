@@ -19,7 +19,7 @@ focada e o RLS coerente.
 |------|---------|
 | 1 | `profiles`, `organizations`, `organization_members`, `whatsapp_accounts` |
 | **2 (atual)** | `contacts`, `conversations`, `messages` |
-| 3 | `flows`, `flow_steps`, `flow_options`, `flow_sessions`, `captured_answers` |
+| 3 (E3A) | `automation_flows`, `automation_flow_versions`, `automation_sessions`, `automation_executions` (JSON versionado no lugar de `flows`, `flow_steps`, `flow_options`, `flow_sessions`, `captured_answers`; ver `docs/AUTOMACOES.md`) |
 | 4 | `webhook_events` |
 
 `conversation_assignments` foi avaliada e postergada: `conversations.assigned_user_id`
@@ -323,6 +323,9 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0005_ingest_inbound_message` | função de ingestão | 0001, 0003 |
 | `0006_organization_guard` | suspensão efetiva, `set_organization_status`, restrição de escrita em `organizations` e `whatsapp_accounts` | 0001–0005 |
 | `0007_organization_modules` | enum e tabela de módulos, `has_module`, `set_organization_module`, Atendimento nas organizações existentes | 0006 |
+| `0008_conversation_actions` | assumir, responder, resolver; `conversation_events` | 0007 |
+| `0009_automation_enums` | `message_type` `image`/`interactive`; eventos `automation_started`/`handed_off` | 0008 |
+| `0010_automations` | fluxos, versões imutáveis, sessões, execuções, `messages.payload`/`automation_execution_id`, funções de configuração e execução, RLS | 0009 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -403,6 +406,23 @@ Assumir, responder e resolver são funções SECURITY DEFINER
 `has_module(org, 'atendimento')` e travam a conversa antes de decidir.
 `conversation_events` (só SELECT para a aplicação, RLS com `has_module`) é
 preenchida por gatilho. Regras, SQLSTATEs e o simulador: `docs/ATENDIMENTO.md`.
+
+### Automações (0009/0010, E3A)
+
+Fluxos em JSON versionado (`automation_flows` + `automation_flow_versions`
+imutáveis), sessão presa à versão (`automation_sessions`) e uma execução por
+mensagem recebida (`automation_executions`, `UNIQUE (message_id)`), em ordem de
+`messages.arrival_order` (identity, atribuída no INSERT sob a trava da conversa). As respostas
+vão para `messages` (`sender_type = 'bot'`, `payload`, `automation_execution_id`),
+sem tabela paralela. `antero_app` só lê; a configuração é por
+`save_automation_flow`/`publish_automation_flow`/`set_automation_flow_status`
+(owner/admin + módulo) e a execução por funções `*_internal` sem EXECUTE, hoje
+alcançadas só pela porta de desenvolvimento `dev_automation_*` (canal
+`development`, owner/admin). Gatilho em `conversations` interrompe a sessão ativa
+quando a conversa sai de `bot` por outro caminho; `automation_begin_delivery_internal`
+barra respostas pendentes se o módulo, a organização, o canal ou um atendente
+mudou. Regras e SQLSTATEs:
+`docs/AUTOMACOES.md`.
 
 ### Entrada de sistema (webhook/worker) — desenho futuro
 

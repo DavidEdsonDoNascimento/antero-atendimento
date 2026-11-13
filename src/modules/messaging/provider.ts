@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import type { WhatsappProvider } from "../../lib/types/database";
+import type { OutboundAction } from "../automations/actions";
 
 // Lógica pura (sem I/O, sem segredo) — sem `import "server-only"`, testável com
 // `node --test`. Quem chama é `modules/conversations/sql-commands.ts`, fora de
@@ -22,6 +23,12 @@ export type OutboundTextMessage = {
   idempotencyKey: string;
 };
 
+/**
+ * Mensagem da automação (E3A): texto, imagem ou lista interativa, como o motor
+ * a produziu. O provedor real a traduz com `toCloudApiMessage` (cloud-api.ts).
+ */
+export type OutboundActionMessage = Omit<OutboundTextMessage, "text"> & { action: OutboundAction };
+
 export type SendResult =
   | { ok: true; externalMessageId: string }
   | { ok: false; reason: string };
@@ -31,6 +38,8 @@ export interface MessagingProvider {
   /** `true` quando nada sai do servidor: a interface identifica as mensagens como simuladas. */
   readonly simulated: boolean;
   sendText(message: OutboundTextMessage): Promise<SendResult>;
+  /** Envio de uma ação da automação. Mesma semântica de `sendText`. */
+  send(message: OutboundActionMessage): Promise<SendResult>;
 }
 
 /** Prefixo dos ids externos do provedor simulado: nunca se confunde com um `wamid` da Meta. */
@@ -44,6 +53,9 @@ export const simulatedProvider: MessagingProvider = {
   provider: "development",
   simulated: true,
   async sendText() {
+    return { ok: true, externalMessageId: `${SIMULATED_MESSAGE_ID_PREFIX}${randomUUID()}` };
+  },
+  async send() {
     return { ok: true, externalMessageId: `${SIMULATED_MESSAGE_ID_PREFIX}${randomUUID()}` };
   },
 };

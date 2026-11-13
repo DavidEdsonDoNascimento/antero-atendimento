@@ -63,17 +63,19 @@ VALUES
   (pg_temp.id('org_b'), pg_temp.id('cv_b'), pg_temp.id('wa_b'), 'inbound', 'contact', 'mensagem da org B');
 
 -- ---------------------------------------------------------------------------
--- Estrutura: RLS ligada, 17 políticas exatas, todas só para antero_app
+-- Estrutura: RLS ligada, 20 políticas exatas, todas só para antero_app
 -- ---------------------------------------------------------------------------
 SELECT ok(
   (SELECT bool_and(c.relrowsecurity) FROM pg_class c
    WHERE c.oid IN ('public.profiles'::regclass, 'public.organizations'::regclass,
                    'public.organization_members'::regclass, 'public.whatsapp_accounts'::regclass,
                    'public.contacts'::regclass, 'public.conversations'::regclass, 'public.messages'::regclass,
-                   'public.organization_modules'::regclass, 'public.conversation_events'::regclass)),
-  'RLS habilitada nas 9 tabelas de negócio'
+                   'public.organization_modules'::regclass, 'public.conversation_events'::regclass,
+                   'public.automation_flows'::regclass, 'public.automation_flow_versions'::regclass,
+                   'public.automation_sessions'::regclass, 'public.automation_executions'::regclass)),
+  'RLS habilitada nas 13 tabelas de negócio'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 16, 'existem exatamente 16 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 20, 'existem exatamente 20 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
@@ -86,8 +88,12 @@ SELECT set_eq(
     ('contacts', 'contacts_select', 'SELECT'), ('conversations', 'conversations_select', 'SELECT'),
     ('messages', 'messages_select', 'SELECT'),
     ('organization_modules', 'organization_modules_select', 'SELECT'),
-    ('conversation_events', 'conversation_events_select', 'SELECT')$$,
-  'as 16 políticas da auditoria, com o comando correto'
+    ('conversation_events', 'conversation_events_select', 'SELECT'),
+    ('automation_flows', 'automation_flows_select', 'SELECT'),
+    ('automation_flow_versions', 'automation_flow_versions_select', 'SELECT'),
+    ('automation_sessions', 'automation_sessions_select', 'SELECT'),
+    ('automation_executions', 'automation_executions_select', 'SELECT')$$,
+  'as 20 políticas da auditoria, com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -107,7 +113,9 @@ SELECT set_eq(
            ('organization_members', 'SELECT'), ('organization_members', 'INSERT'), ('organization_members', 'UPDATE'), ('organization_members', 'DELETE'),
            ('whatsapp_accounts', 'SELECT'),
            ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT'),
-           ('organization_modules', 'SELECT'), ('conversation_events', 'SELECT')$$,
+           ('organization_modules', 'SELECT'), ('conversation_events', 'SELECT'),
+           ('automation_flows', 'SELECT'), ('automation_flow_versions', 'SELECT'),
+           ('automation_sessions', 'SELECT'), ('automation_executions', 'SELECT')$$,
   'antero_app tem exatamente os privilégios de tabela esperados (sem TRUNCATE/REFERENCES/TRIGGER)'
 );
 SELECT set_eq(

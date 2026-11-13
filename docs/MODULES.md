@@ -9,7 +9,7 @@ identificador de cliente: toda diferença entre organizações é uma linha em
 | Identificador | Nome | Finalidade | Rotas | Situação |
 | --- | --- | --- | --- | --- |
 | `atendimento` | Atendimento | Inbox e atendimento humano | `/conversas` | disponível (assumir, responder, resolver — `docs/ATENDIMENTO.md`) |
-| `automacoes` | Automações | Fluxos, menus e respostas automáticas | `/fluxos` | em desenvolvimento |
+| `automacoes` | Automações | Fluxos, menus e respostas automáticas | `/fluxos` | motor disponível no simulador; editor na E3B (`docs/AUTOMACOES.md`) |
 | `campanhas` | Campanhas | Criação e envio de campanhas | `/campanhas` | em desenvolvimento |
 | `contatos` | Contatos | Gestão, importação e listas comerciais | `/contatos` | em desenvolvimento |
 
@@ -94,7 +94,9 @@ Campanhas depende de Contatos, por causa de públicos, listas e consentimento.
   trava a linha da organização para que alterações simultâneas não quebrem a regra.
 
 Automações e Atendimento são independentes: um cliente pode contratar só
-Automações. O encaminhamento para humano tratará esse destino quando existir.
+Automações. Sem Atendimento, o motor não encaminha para humano: avisa o cliente e
+segue o fluxo ou conclui, e o banco recusa um encaminhamento (`AU008`). Ver
+`docs/AUTOMACOES.md`.
 
 ## Organização suspensa
 

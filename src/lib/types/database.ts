@@ -15,14 +15,16 @@ export type WhatsappStatus = "connected" | "disconnected";
 export type ConversationStatus = "bot" | "waiting" | "human" | "resolved";
 export type MessageDirection = "inbound" | "outbound";
 export type MessageSender = "contact" | "bot" | "user" | "system";
-export type MessageType = "text";
+export type MessageType = "text" | "image" | "interactive";
 export type MessageDeliveryStatus =
   | "pending"
   | "sent"
   | "delivered"
   | "read"
   | "failed";
-export type ConversationEventType = "assigned" | "resolved" | "reopened";
+export type ConversationEventType = "assigned" | "resolved" | "reopened" | "automation_started" | "handed_off";
+export type AutomationFlowStatus = "draft" | "active" | "paused";
+export type AutomationSessionStatus = "active" | "handed_off" | "completed" | "interrupted" | "failed";
 
 export type Organization = {
   id: string;
@@ -101,6 +103,10 @@ export type Message = {
   delivery_status: MessageDeliveryStatus;
   /** Chave de idempotência do envio pelo atendente (0008); nula nas demais. */
   client_message_id: string | null;
+  /** Ação completa de uma resposta da automação (0010); nula nas demais. */
+  payload: unknown | null;
+  /** Execução da automação que produziu esta resposta (0010). */
+  automation_execution_id: string | null;
   created_at: string;
 };
 
@@ -111,4 +117,33 @@ export type ConversationEvent = {
   event_type: ConversationEventType;
   user_id: string | null;
   created_at: string;
+};
+
+export type AutomationFlow = {
+  id: string;
+  organization_id: string;
+  slug: string;
+  name: string;
+  status: AutomationFlowStatus;
+  is_entry: boolean;
+  draft_revision: number;
+  published_version_id: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AutomationSession = {
+  id: string;
+  organization_id: string;
+  conversation_id: string;
+  flow_id: string;
+  flow_version_id: string;
+  status: AutomationSessionStatus;
+  current_step_id: string | null;
+  state: unknown;
+  revision: number;
+  end_reason: string | null;
+  started_at: string;
+  updated_at: string;
+  ended_at: string | null;
 };

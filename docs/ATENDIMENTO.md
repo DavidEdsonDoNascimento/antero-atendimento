@@ -16,6 +16,12 @@ nenhuma foi alterada em relação ao modelo anterior, só passou a existir.
 | Responder (`send_conversation_reply`) | `human` | `human` | só o responsável, dentro da janela | mesma chave devolve a mensagem já gravada |
 | Resolver (`resolve_conversation`) | `human` | `resolved` (responsável mantido) | responsável, owner ou admin | sem efeito |
 | Reabrir (`ingest_inbound_message`, 0005) | `resolved` | `waiting`, sem responsável | nova mensagem do cliente | reentrega (mesmo id externo) não reabre |
+| Automação começa (0010) | `waiting` (1ª mensagem do ciclo, sem responsável) | `bot` | automação | mesma mensagem não processa duas vezes |
+| Automação encaminha (0010) | `bot` | `waiting`, sem responsável | automação | — |
+| Automação conclui (0010) | `bot` | `resolved` | automação (sem Atendimento, ou etapa final) | — |
+
+Assumir uma conversa em `bot` interrompe a automação na hora (gatilho, 0010).
+Regras do motor, ciclo e encaminhamento: `docs/AUTOMACOES.md`.
 
 Recusas, com SQLSTATE próprio (mapeados em `modules/conversations/attendance.ts`):
 

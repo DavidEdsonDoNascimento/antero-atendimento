@@ -1,3 +1,4 @@
+import type { ConversationAutomation } from "@/modules/automations/sql-queries";
 import type { AttendanceViewer } from "@/modules/conversations/attendance";
 import type {
   ConversationDetail,
@@ -19,6 +20,8 @@ export type ConversationDetailState =
       detail: ConversationDetail;
       messages: MessageHistoryPage;
       events: ConversationEventItem[];
+      /** Última sessão de automação, com os dados coletados; nula se a automação nunca atuou. */
+      automation: ConversationAutomation | null;
       /** Quem está vendo (sessão + papel na organização ativa): só orienta quais botões mostrar. */
       viewer: AttendanceViewer;
     };

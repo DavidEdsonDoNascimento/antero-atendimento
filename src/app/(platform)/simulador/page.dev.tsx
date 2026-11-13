@@ -5,10 +5,12 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { IconConversations } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireActiveContext } from "@/lib/auth/dal";
+import { AccessDeniedError } from "@/lib/db";
 import { isSimulatorEnabled } from "@/lib/dev-environment";
+import { listFlows } from "@/modules/automations/sql-queries";
 import { listSimulatorChannels, listSimulatorContacts } from "@/modules/simulator/sql-queries";
 
-import { SimulatorForm } from "./_components/simulator-form";
+import { SimulatorForm, type SimulatorAutomation } from "./_components/simulator-form";
 
 export const metadata: Metadata = { title: "Simulador de mensagens" };
 
@@ -31,6 +33,17 @@ export default async function SimuladorPage({
   const requested = (await searchParams).canal;
   const selected = channels.find((channel) => channel.id === requested) ?? channels[0] ?? null;
   const contacts = selected ? await listSimulatorContacts({ userId }, selected.id) : [];
+  // Fluxo de entrada da organização do canal (null = módulo Automações desabilitado).
+  let entryFlow: SimulatorAutomation = null;
+  if (selected) {
+    try {
+      const flows = await listFlows({ userId, organizationId: selected.organization_id });
+      entryFlow = { enabled: true, flow: flows.find((flow) => flow.isEntry) ?? null };
+    } catch (error) {
+      if (!(error instanceof AccessDeniedError)) throw error;
+      entryFlow = { enabled: false, flow: null };
+    }
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -45,6 +58,7 @@ export default async function SimuladorPage({
           selected={selected}
           contacts={contacts}
           activeOrganizationId={organization.id}
+          automation={entryFlow}
         />
       ) : (
         <EmptyState

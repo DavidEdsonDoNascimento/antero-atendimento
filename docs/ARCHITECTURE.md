@@ -43,7 +43,8 @@ src/
   modules/               # lógica por domínio de negócio
     auth/                # schemas + server actions
     conversations/       # Inbox: leitura (sql-queries), atendimento (sql-commands, actions)
-    messaging/           # contrato de envio por canal (provedor simulado)
+    automations/         # motor de fluxos (puro), definição versionada, executor
+    messaging/           # contrato de envio por canal (provedor simulado, formato Cloud API)
     simulator/           # simulador de mensagens recebidas (só dev/test)
     organizations/  users/  whatsapp/   # consultas SQL por domínio (sql-queries.ts)
   lib/
@@ -104,3 +105,8 @@ simulador (`/simulador`, só em `next dev`) e as respostas saem pelo
 `MessagingProvider` simulado (`modules/messaging`), sem rede nem token. O
 provedor da Cloud API e o webhook real chegam nas próximas entregas (E2B–E2D),
 sem reescrever as regras de atendimento. Ver `docs/ATENDIMENTO.md`.
+
+As automações (E3A) usam o mesmo caminho: o motor (`modules/automations`) é
+TypeScript puro e só devolve ações (`text`, `image`, `list`); o banco decide
+quando ele pode agir e grava o resultado; o provedor envia. Ver
+`docs/AUTOMACOES.md`.

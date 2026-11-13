@@ -14,6 +14,7 @@ import { buildConversationsHref } from "../_lib/href";
 import type { ConversationDetailState } from "../_lib/types";
 import { AttendanceControls } from "./attendance-controls";
 import { AttendanceLog } from "./attendance-log";
+import { AutomationSummary } from "./automation-summary";
 import { MessageList } from "./message-list";
 import { ReplyComposer } from "./reply-composer";
 
@@ -68,7 +69,7 @@ export function ConversationDetailPanel({
     );
   }
 
-  const { detail, messages, events, viewer } = state;
+  const { detail, messages, events, automation, viewer } = state;
   const actions = attendanceActionsFor({ status: detail.status, assigneeUserId: detail.assignee?.userId ?? null }, viewer);
   const simulated = detail.channelProvider === "development";
 
@@ -110,6 +111,7 @@ export function ConversationDetailPanel({
         )}
         <AttendanceControls key={detail.id} conversationId={detail.id} actions={actions} />
         <AttendanceLog events={events} viewerId={viewer.userId} />
+        {automation && <AutomationSummary automation={automation} />}
       </div>
 
       <MessageList
@@ -150,6 +152,7 @@ function replyBlockedReason(detail: ConversationDetail): string | null {
 }
 
 function replyHint(status: ConversationDetail["status"], canClaim: boolean): string {
+  if (status === "bot" && canClaim) return "A automação está respondendo. Assuma para interromper o robô e responder.";
   if (status === "resolved") return "Atendimento resolvido. Uma nova mensagem do cliente reabre a conversa.";
   if (canClaim) return "Assuma o atendimento para responder.";
   return "Esta conversa está com outro atendente.";
