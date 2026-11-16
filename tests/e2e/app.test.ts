@@ -509,10 +509,15 @@ async function postModuleAction(client: Client, actionId: string, fields: Record
   return { status: response.status, text: await response.text() };
 }
 
-const moduleActionIdOf = (html: string) =>
-  /\$ACTION_ID_([0-9a-f]{20,})/.exec(html)?.[1] ??
-  /&quot;id&quot;:&quot;([0-9a-f]{20,})&quot;/.exec(html)?.[1] ??
-  /"id":"([0-9a-f]{20,})"/.exec(html)?.[1];
+// O detalhe da organização tem outros formulários (situação): procura só o do painel de módulos.
+const moduleActionIdOf = (html: string) => {
+  const form = html.split("<form").find((segment) => segment.includes('name="module"')) ?? html;
+  return (
+    /\$ACTION_ID_([0-9a-f]{20,})/.exec(form)?.[1] ??
+    /&quot;id&quot;:&quot;([0-9a-f]{20,})&quot;/.exec(form)?.[1] ??
+    /"id":"([0-9a-f]{20,})"/.exec(form)?.[1]
+  );
+};
 
 test("módulos: menu e rotas seguem a organização ativa; URL direta é negada no servidor", async () => {
   const owner = await loggedIn("aOwner");
@@ -697,4 +702,158 @@ test("módulos: toda rota do catálogo é protegida (organização sem nenhum m�
   } finally {
     await setModules(f!.orgA, ["atendimento"]);
   }
+});
+
+// ---------------------------------------------------------------------------
+// G1 — central de organizações
+// ---------------------------------------------------------------------------
+
+const textOf = (html: string) => html.replaceAll("<!-- -->", "");
+
+test("central: lista com busca e filtro por situação, detalhes da organização e volta à lista", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+
+  const list = await platformAdmin.page("/admin");
+  assert.equal(list.status, 200);
+  assert.match(list.html, /Administração da plataforma/, "o cabeçalho diz que é a administração, não uma organização");
+  assert.match(list.html, /role="search"/);
+  for (const name of ["Org A Integração", "Org B Integração", "Org C Vazia"]) assert.match(list.html, new RegExp(name));
+  assert.match(list.html, new RegExp(`href="/admin/organizacoes/${f!.orgA}"`));
+
+  // Busca: sem acento nem caixa, e só a organização encontrada permanece.
+  const search = await platformAdmin.page("/admin?busca=ORG%20a%20integracao");
+  assert.match(search.html, /Org A Integração/);
+  assert.doesNotMatch(search.html, /Org B Integração|Org C Vazia/);
+  const none = await platformAdmin.page("/admin?busca=nao-existe-xyz");
+  assert.match(none.html, /Nenhuma organização encontrada/);
+  assert.match(none.html, /Limpar filtros/);
+
+  // Situação: C suspensa aparece só em "Suspensas".
+  await setStatus(f!.orgC, "inactive");
+  try {
+    const suspended = await platformAdmin.page("/admin?situacao=inactive");
+    assert.match(suspended.html, /Org C Vazia/);
+    assert.doesNotMatch(suspended.html, /Org A Integração|Org B Integração/);
+    const active = await platformAdmin.page("/admin?situacao=active");
+    assert.doesNotMatch(active.html, /Org C Vazia/);
+    assert.match(active.html, /Org A Integração/);
+    const both = await platformAdmin.page("/admin?situacao=inactive&busca=org%20a");
+    assert.match(both.html, /Nenhuma organização encontrada/);
+  } finally {
+    await setStatus(f!.orgC, "active");
+  }
+
+  // Valores estranhos na URL: sem erro, sem filtro indevido.
+  for (const query of ["busca=%25", "busca=_", "busca=%27%20OR%201%3D1%20--", "situacao=todas", "situacao=active%27", `busca=${"x".repeat(500)}`]) {
+    const odd = await platformAdmin.page(`/admin?${query}`);
+    assert.equal(odd.status, 200, query);
+    assert.equal(odd.redirect, null, query);
+  }
+  assert.match((await platformAdmin.page("/admin?busca=%25")).html, /Nenhuma organização encontrada/);
+
+  // Detalhes: dados, módulos, equipe, canal, aviso de escopo e retorno.
+  const detail = await platformAdmin.page(`/admin/organizacoes/${f!.orgA}`);
+  assert.equal(detail.status, 200);
+  const text = textOf(detail.html);
+  assert.match(text, /Org A Integração/);
+  assert.match(text, /Voltar às organizações/);
+  assert.match(text, /href="\/admin"/);
+  assert.match(text, /Dados da organização/);
+  assert.match(text, /Módulos contratados/);
+  assert.match(text, /Equipe \(4\)/);
+  for (const who of ["aOwner", "aAttendant", "aDisabled"] as Who[]) assert.match(text, new RegExp(emailOf(who).replace(".", "\\.")));
+  assert.match(text, /Proprietário/);
+  assert.match(text, /Desativado/);
+  assert.match(text, /Canal de atendimento/);
+  assert.match(text, /como administrador da\s+plataforma|como administrador da plataforma/);
+  assert.match(text, /será disponibilizada em\s+uma entrega futura|será disponibilizada em uma entrega futura/);
+  // O que não pode aparecer: dados operacionais e identificadores técnicos do canal.
+  assert.doesNotMatch(text, /h7 atendente|Mensagem longa|Contato B2/);
+  assert.doesNotMatch(text, new RegExp(f!.conv.c1));
+});
+
+test("central: abrir uma organização não vira vínculo nem troca a organização dos módulos operacionais", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const countMembers = async () =>
+    Number((await fixture.query("SELECT count(*) AS n FROM public.organization_members WHERE user_id = $1", [f!.more.platformAdmin])).rows[0].n);
+  assert.equal(await countMembers(), 0);
+
+  for (const organizationId of [f!.orgA, f!.orgB, f!.orgC]) {
+    assert.equal((await platformAdmin.page(`/admin/organizacoes/${organizationId}`)).status, 200);
+  }
+  assert.equal(await countMembers(), 0, "nenhum vínculo criado");
+  assert.equal([...platformAdmin.cookies.keys()].filter((name) => !name.includes("session")).length, 0, "nenhum cookie de seleção");
+
+  // Sem vínculo, os módulos operacionais continuam fechados, com ou sem o id na URL.
+  for (const path of [
+    "/conversas",
+    `/conversas?organizationId=${f!.orgA}`,
+    `/conversas/${f!.conv.c1}`,
+    "/fluxos",
+    "/contatos",
+    "/equipe",
+    "/configuracoes",
+    `/fluxos/imagens/${f!.orgA}`,
+  ]) {
+    const page = await platformAdmin.page(path);
+    assert.equal(page.redirect, "/sem-organizacao", path);
+    assert.doesNotMatch(page.html, /h7 atendente|Mensagem longa/, path);
+  }
+});
+
+test("central: usuários comuns e organização de outro cliente não entram; identificador manipulado não abre nada", async () => {
+  const owner = await loggedIn("aOwner");
+  const attendant = await loggedIn("aAttendant");
+  const bOwner = await loggedIn("bOwner");
+  const anonymous = new Client();
+
+  for (const path of ["/admin", "/admin?busca=org", `/admin/organizacoes/${f!.orgA}`, `/admin/organizacoes/${f!.orgB}`]) {
+    for (const client of [owner, attendant, bOwner]) {
+      const page = await client.page(path);
+      assert.equal(page.redirect, "/visao-geral", path);
+      assert.doesNotMatch(page.html, /Org A Integração[\s\S]*Equipe \(|Org B Integração[\s\S]*Equipe \(/, path);
+    }
+    assert.equal((await anonymous.page(path)).redirect, "/login", path);
+  }
+
+  const platformAdmin = await loggedIn("platformAdmin");
+  for (const id of [
+    "nao-e-uuid",
+    "00000000-0000-4000-8000-000000000000",
+    "%27%20OR%201%3D1",
+    "..%2F..%2Fadmin",
+    `${f!.orgA}%20`,
+    f!.orgA.toUpperCase().slice(0, 35),
+  ]) {
+    const page = await platformAdmin.page(`/admin/organizacoes/${id}`);
+    assert.equal(page.status, 404, id);
+    assert.doesNotMatch(page.html, /Equipe \(/, id);
+  }
+  // Outro nome de rota ou subcaminho inventado: nada de dados.
+  for (const path of [`/admin/organizacoes/${f!.orgA}/conversas`, `/admin/organizacoes/${f!.orgA}/fluxos`, "/admin/conversas"]) {
+    assert.equal((await platformAdmin.page(path)).status, 404, path);
+  }
+});
+
+test("central: suspender e reativar continuam funcionando pelo detalhe, sem tocar nos módulos", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const before = await fixture.query("SELECT module::text, enabled FROM public.organization_modules WHERE organization_id = $1 ORDER BY module", [f!.orgC]);
+
+  const active = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
+  assert.match(textOf(active.html), /Confirmar suspensão/);
+  const suspendId = /\$ACTION_ID_([0-9a-f]+)/.exec(active.html)?.[1];
+  assert.ok(suspendId, "formulário de suspensão no detalhe");
+  try {
+    assert.equal((await postStatusAction(platformAdmin, suspendId, f!.orgC, "inactive")).status < 400, true);
+    assert.equal(await statusOf(f!.orgC), "inactive");
+    const suspended = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
+    assert.match(textOf(suspended.html), /Organização suspensa/);
+    assert.match(textOf(suspended.html), /Reativar/);
+    assert.equal((await postStatusAction(platformAdmin, suspendId, f!.orgC, "active")).status < 400, true);
+    assert.equal(await statusOf(f!.orgC), "active");
+  } finally {
+    await setStatus(f!.orgC, "active");
+  }
+  const after = await fixture.query("SELECT module::text, enabled FROM public.organization_modules WHERE organization_id = $1 ORDER BY module", [f!.orgC]);
+  assert.deepEqual(after.rows, before.rows);
 });
