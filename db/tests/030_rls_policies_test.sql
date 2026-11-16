@@ -1,4 +1,4 @@
--- Antero Atendimentos — Entrega 2: as políticas de RLS (15 desde a G2A), testadas por
+-- Antero Atendimentos — Entrega 2: as políticas de RLS (16 desde a G2B), testadas por
 -- COMPORTAMENTO (não basta a política existir).
 --
 -- Cenário: duas organizações (A e B), membros de A em todos os papéis e
@@ -73,10 +73,10 @@ SELECT ok(
                    'public.organization_modules'::regclass, 'public.conversation_events'::regclass,
                    'public.automation_flows'::regclass, 'public.automation_flow_versions'::regclass,
                    'public.automation_sessions'::regclass, 'public.automation_executions'::regclass,
-                   'public.automation_media'::regclass)),
-  'RLS habilitada nas 14 tabelas de negócio'
+                   'public.automation_media'::regclass, 'public.audit_events'::regclass)),
+  'RLS habilitada nas 15 tabelas de negócio (inclui audit_events, G2B)'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 15, 'existem exatamente 15 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 16, 'existem exatamente 16 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
@@ -92,8 +92,9 @@ SELECT set_eq(
     ('automation_flow_versions', 'automation_flow_versions_select', 'SELECT'),
     ('automation_sessions', 'automation_sessions_select', 'SELECT'),
     ('automation_executions', 'automation_executions_select', 'SELECT'),
-    ('automation_media', 'automation_media_select', 'SELECT')$$,
-  'as 15 políticas (sem escrita direta em vínculos nem em organizações, G2A), com o comando correto'
+    ('automation_media', 'automation_media_select', 'SELECT'),
+    ('audit_events', 'audit_events_select', 'SELECT')$$,
+  'as 16 políticas (sem escrita direta em vínculos nem em organizações, G2A; auditoria só leitura, G2B), com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -116,7 +117,7 @@ SELECT set_eq(
            ('organization_modules', 'SELECT'), ('conversation_events', 'SELECT'),
            ('automation_flows', 'SELECT'), ('automation_flow_versions', 'SELECT'),
            ('automation_sessions', 'SELECT'), ('automation_executions', 'SELECT'),
-           ('automation_media', 'SELECT')$$,
+           ('automation_media', 'SELECT'), ('audit_events', 'SELECT')$$,
   'antero_app tem exatamente os privilégios de tabela esperados (sem TRUNCATE/REFERENCES/TRIGGER)'
 );
 SELECT set_eq(

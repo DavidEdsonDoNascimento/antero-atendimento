@@ -162,6 +162,7 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `080_organization_modules_test` | módulos por organização: `has_module`, `set_organization_module`, RLS |
 | `090_conversation_actions_test` | assumir, responder, resolver e reabrir (0008), janela de 24 h, `conversation_events` |
 | `120_member_rules_test` | sem escrita direta em vínculos e organizações (0012), garantia de owner ativo, o que continua funcionando |
+| `130_audit_events_test` | auditoria administrativa (0013): eventos, autor, manutenção, contexto forjado, leitura só do admin global, imutabilidade, atomicidade |
 
 ## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 

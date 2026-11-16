@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import type { OrganizationContext } from "@/lib/db";
 import { IdentityUnavailableError } from "@/lib/identity/errors";
 import { getValidatedSession } from "@/lib/identity/session";
+import { logSecurityEvent } from "@/lib/security-log";
 import type { MemberRole, Organization, OrganizationModule, Profile } from "@/lib/types/database";
 import {
   getActiveContext as loadActiveContext,
@@ -103,9 +104,19 @@ export function organizationContextOf(context: ActiveContext): OrganizationConte
   return { userId: context.userId, organizationId: context.organization.id };
 }
 
+/**
+ * Admin da plataforma ou redirect. Quem chega aqui sem o papel (URL digitada ou
+ * POST direto numa ação administrativa: o menu não mostra o link) gera UMA
+ * linha no log de segurança por requisição (`cache`). Sem sessão, `requireUser`
+ * já levou ao login antes: isso é navegação normal, não recusa.
+ */
 export const requirePlatformAdmin = cache(async (): Promise<Profile> => {
+  const user = await requireUser();
   const profile = await getProfile();
-  if (!profile?.is_platform_admin) redirect("/visao-geral");
+  if (!profile?.is_platform_admin) {
+    logSecurityEvent({ action: "admin.access", reason: "not_platform_admin", userId: user.id });
+    redirect("/visao-geral");
+  }
   return profile;
 });
 

@@ -355,6 +355,7 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0010_automations` | fluxos, versões imutáveis, sessões, execuções, `messages.payload`/`automation_execution_id`, funções de configuração e execução, RLS | 0009 |
 | `0011_automation_media` | imagens dos fluxos no PostgreSQL, `save_automation_media` | 0010 |
 | `0012_member_rules` | sem escrita direta de `antero_app` em `organization_members` e em `organizations` (INSERT, UPDATE (name), DELETE; privilégios e políticas); gatilho de owner ativo | 0001–0011 |
+| `0013_audit_events` | `audit_events` imutável, gatilhos de auditoria em `organizations`/`organization_modules`, `record_audit_event`, `set_organization_status` sem regravar o mesmo status | 0006, 0007, 0012 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -461,6 +462,81 @@ Escrita só por `save_automation_media` (owner/admin + Automações, organizaç�
 ativa; tipo pela assinatura; cota 100 imagens/100 MB; `AU011`–`AU013`). Leitura
 por RLS: membro ativo com Automações ou Atendimento. O fluxo guarda só o id.
 Rollback recusado se houver imagem. Decisão e limites: `docs/AUTOMACOES.md`.
+
+### Auditoria administrativa (0013, G2B)
+
+`public.audit_events` registra **alterações administrativas efetivadas**:
+
+| Ação | Quando |
+| --- | --- |
+| `organization.suspended` / `organization.reactivated` | `organizations.status` muda de fato |
+| `module.enabled` / `module.disabled` | o estado **efetivo** do módulo muda (sem linha = desabilitado): habilitar, desabilitar, inserir já habilitado, excluir linha habilitada |
+
+Não geram evento: repetir o estado atual (suspensa → suspensa, habilitado → habilitado), desabilitar
+módulo nunca habilitado, alterar outras colunas, a exclusão em cascata dos módulos de uma organização
+excluída, e qualquer operação **recusada** (ver "Recusas" abaixo).
+
+**Como nasce o evento.** Gatilhos `AFTER` nas tabelas de estado (`organizations_audit_status`,
+`organization_modules_audit_insert/update/delete`), no mesmo padrão de `record_conversation_event`,
+chamam `record_audit_event` (SECURITY INVOKER, sem EXECUTE para nenhum papel da aplicação). Vale para
+qualquer caminho: `set_organization_status`/`set_organization_module` e manutenção por SQL.
+
+**Atomicidade.** O evento é gravado na mesma instrução da alteração: se a gravação falhar, a alteração
+falha e a transação é desfeita; ROLLBACK leva os dois. `set_organization_status` (desde a 0013) trava a
+organização, compara e **não regrava** quando o status pedido já é o atual (sem `updated_at` falso nem
+evento); devolve o mesmo valor. As duas funções serializam na linha da organização, então `from`/`to`
+são consistentes sob concorrência.
+
+**Ordem.** `id` é `bigint` GENERATED ALWAYS; `occurred_at` é `clock_timestamp()` da gravação, feita
+sob a trava da organização. Dentro de uma organização, `(occurred_at, id)` segue a ordem real das
+mudanças; entre organizações, nenhum dos dois é a ordem de COMMIT. Ordene sempre por `(occurred_at, id)`.
+
+**Colunas.** `organization_id` (sem FK: sobrevive à exclusão), `actor_user_id` (sem FK), `actor_kind`,
+`action`, `details` (`{"from", "to"}` e `module`; objeto de até 2 KB). Sem e-mail, nome, conteúdo de
+cliente ou credencial: o nome do autor é resolvido na leitura por `profiles`.
+
+**Autor.**
+
+| Situação | Resultado |
+| --- | --- |
+| Contexto válido (`app.current_user_id()`) de admin da plataforma | `platform_admin`, `actor_user_id` = usuário |
+| Sem contexto de usuário, conectado como operador (não `antero_app`) | `maintenance`, `details.db_role` = `session_user` |
+| Valor de usuário sem a marca da transação (forjado) | alteração **recusada** (42501) |
+| Contexto válido de quem não é admin da plataforma | alteração **recusada** (42501) |
+| `antero_app` sem contexto | alteração **recusada** (42501) |
+
+O autor nunca vem de formulário: `app.set_user_context` é chamado só pelo servidor com a sessão
+validada (`withUserTransaction`). `session_user` é o login real; dentro das funções SECURITY DEFINER
+o `current_user` é `antero_owner`, que **não** é usado como autor.
+
+**Segurança.** RLS `audit_events_select` só para `is_platform_admin()`; `antero_app` só tem SELECT;
+sem políticas de escrita; PUBLIC sem acesso. Membros da organização afetada não leem os eventos.
+Gatilhos `audit_events_immutable` (UPDATE/DELETE) e `audit_events_no_truncate` recusam alteração para
+**qualquer** papel, inclusive o dono das tabelas.
+
+**Limites.** O dono das tabelas (`antero_owner`, via `antero_migrator`) pode desligar ou remover os
+gatilhos, e o superusuário pode tudo. A imutabilidade protege contra a aplicação e contra erro humano,
+não contra quem administra o banco. Evidência de adulteração (encadeamento por hash, coletor externo)
+fica para depois (7B).
+
+**Recusas.** Não ficam em `audit_events` (seriam desfeitas com a transação recusada). São registradas
+pela aplicação como uma linha JSON no stdout do servidor (`src/lib/security-log.ts`): `type: "security"`,
+`event: "admin.denied"`, `id` do registro, instante, ação, motivo (`not_platform_admin`,
+`access_denied`, `invalid_input`, `organization_not_found`), `userId`, `organizationId` (só se for UUID,
+senão `"invalid"`) e SQLSTATE quando aplicável. Sem e-mail, mensagem do banco ou entrada crua. Pontos:
+`requirePlatformAdmin` (uma linha por requisição de quem não é admin; sem sessão é ida normal ao login)
+e as duas Server Actions administrativas.
+
+**Retenção e leitura.** Sem expurgo; revisar em até 24 meses. Índices `(organization_id, occurred_at
+desc, id desc)` e `(occurred_at desc, id desc)` para consulta por organização e período. A tela de
+atividade é a G2C (ainda não existe).
+
+**G3.** `action` e `actor_kind` são `text` com CHECK (ampliáveis sem migration de enum);
+`record_audit_event` serve a eventos que não são mudança de linha (início/fim de suporte); a coluna de
+sessão de suporte entra na G3, nula.
+
+**Rollback.** O `down` da 0013 **recusa** se houver qualquer evento (não apaga histórico); só reverte em
+banco sem eventos e restaura `set_organization_status` da 0006. Recuperação: backup antes de aplicar.
 
 ### Entrada de sistema (webhook/worker) — desenho futuro
 

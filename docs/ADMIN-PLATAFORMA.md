@@ -45,10 +45,19 @@ execuções (respostas coletadas) e imagens das automações exigem **vínculo a
 da Antero e qualquer acesso a conteúdo operacional dependem de entregas futuras (G3) com autorização
 própria e auditoria.
 
+## Auditoria (G2B)
+
+Suspender, reativar, habilitar e desabilitar módulo geram um evento em `audit_events` na mesma
+transação, com o admin da plataforma como autor, só quando o estado muda de fato. Os eventos são
+imutáveis e só o admin da plataforma pode lê-los; ainda não há tela de atividade (G2C). Recusas
+(acesso de quem não é admin, entrada inválida, organização inexistente, negação no banco) vão para o
+log estruturado do servidor. Suspender e reativar respondem com mensagem no próprio formulário, como os
+módulos, em vez de levar à página de erro. Detalhes: `docs/DATABASE.md`, "Auditoria administrativa".
+
 ## Limites desta entrega
 
-Sem migration, sem novas permissões, sem criar, editar ou remover vínculos, sem auditoria, sem
-cadastro de organização, sem modo suporte. Desde a G2A (0012), nem por SQL da aplicação o admin da
+Sem novas permissões, sem criar, editar ou remover vínculos, sem cadastro de organização, sem modo
+suporte. (A auditoria chegou na G2B, acima.) Desde a G2A (0012), nem por SQL da aplicação o admin da
 plataforma cria vínculos nem cria, exclui ou renomeia organizações: a central só lê, suspende/reativa e
 liga módulos pelas funções existentes. Alterações cadastrais futuras serão operações controladas e auditáveis. O vínculo `admin` da conta de teste "Paula Plataforma" na
 Clínica Aurora continua sendo um vínculo comum de cliente (ver `claude-reports/2026-11-16-investigacao-admin-global.md`).
