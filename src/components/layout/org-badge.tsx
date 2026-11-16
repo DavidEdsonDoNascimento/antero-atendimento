@@ -1,3 +1,4 @@
+import { IconShield } from "@/components/ui/icons";
 import { cn } from "@/lib/utils/cn";
 import type { Organization } from "@/lib/types/database";
 
@@ -22,6 +23,21 @@ export function OrgBadge({ organization }: { organization: Organization }) {
           />
           {active ? "Ativa" : "Inativa"} · {organization.slug}
         </p>
+      </div>
+    </div>
+  );
+}
+
+/** Identifica a administração da plataforma: ali não há organização ativa, e sim a lista de todas. */
+export function PlatformBadge() {
+  return (
+    <div className="flex min-w-0 items-center gap-2.5">
+      <div className="grid size-8 shrink-0 place-items-center rounded-md border border-gold/40 bg-gold/10 text-gold">
+        <IconShield className="size-4" />
+      </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">Administração da plataforma</p>
+        <p className="text-[11px] text-muted-2">Antero Atendimentos · todas as organizações</p>
       </div>
     </div>
   );

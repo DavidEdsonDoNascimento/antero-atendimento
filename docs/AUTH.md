@@ -122,7 +122,8 @@ preservados); reativar restaura o acesso. O administrador da plataforma
 continua chegando ao `/admin` para reativar, sem depender de vínculo, e sua
 permissão global cobre dados cadastrais (organizações, membros, módulos, canais),
 não o conteúdo operacional: conversas, contatos e automações exigem vínculo
-ativo.
+ativo. A central de organizações do `/admin` (`docs/ADMIN-PLATAFORMA.md`) só lê esses
+dados cadastrais, não cria vínculo e não escolhe organização ativa.
 
 **Erros:** identidade/banco indisponível → `app/error.tsx` ("Serviço
 temporariamente indisponível", botão que refaz a requisição) ou mensagem do

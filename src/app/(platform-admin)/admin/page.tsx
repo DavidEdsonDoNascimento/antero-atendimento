@@ -2,22 +2,29 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { IconShield } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
-import { SubmitButton } from "@/components/ui/submit-button";
 import { requirePlatformAdmin } from "@/lib/auth/dal";
 import { orgStatusLabel, orgStatusTone } from "@/lib/labels";
-import { setOrganizationStatusAction } from "@/modules/organizations/actions";
 import { MODULE_CATALOG } from "@/modules/organizations/modules";
+import { organizationsHref, parseOrganizationSearch, parseOrganizationStatusFilter } from "@/modules/organizations/search";
 import {
   listAllOrganizations,
   listEnabledModules,
   type EnabledModuleRow,
 } from "@/modules/organizations/sql-queries";
 
+import { OrganizationFilters } from "./_components/organization-filters";
+import { OrganizationStatusForm } from "./_components/organization-status-form";
+
 export const metadata: Metadata = { title: "Admin da plataforma" };
+
+type AdminPageProps = {
+  searchParams: Promise<{ busca?: string | string[]; situacao?: string | string[] }>;
+};
 
 const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
   dateStyle: "medium",
@@ -36,27 +43,46 @@ function EnabledModules({ modules }: { modules: EnabledModuleRow[] }) {
   );
 }
 
-export default async function AdminPage() {
+export default async function AdminPage({ searchParams }: AdminPageProps) {
   const profile = await requirePlatformAdmin();
+  const sp = await searchParams;
+  const search = parseOrganizationSearch(sp.busca);
+  const status = parseOrganizationStatusFilter(sp.situacao);
+  const filtered = search !== undefined || status !== undefined;
   // O papel é conferido de novo no banco (`public.is_platform_admin`).
   const [organizations, enabledModules] = await Promise.all([
-    listAllOrganizations({ userId: profile.id }),
+    listAllOrganizations({ userId: profile.id }, { search, status }),
     listEnabledModules({ userId: profile.id }),
   ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Admin da plataforma"
-        description="Administração interna da Antero — visão de todas as organizações."
+        title="Organizações"
+        description="Administração interna da Antero: clientes, situação e módulos contratados. Abra uma organização para ver a equipe e o canal."
       />
 
+      <OrganizationFilters search={search} status={status} />
+
       {organizations.length === 0 ? (
-        <EmptyState
-          icon={<IconShield className="size-6" />}
-          title="Nenhuma organização cadastrada"
-          description="Cadastre a primeira organização seguindo docs/SETUP.md."
-        />
+        filtered ? (
+          <EmptyState
+            icon={<IconShield className="size-6" />}
+            title="Nenhuma organização encontrada"
+            description="Nenhuma organização combina com a busca e a situação escolhidas."
+            action={
+              <Link href={organizationsHref()} className={buttonVariants({ variant: "secondary", size: "sm" })}>
+                Limpar filtros
+              </Link>
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<IconShield className="size-6" />}
+            title="Nenhuma organização cadastrada"
+            description="Cadastre a primeira organização seguindo docs/SETUP.md."
+          />
+        )
       ) : (
         <Card className="overflow-hidden">
           <div className="overflow-x-auto">
@@ -75,7 +101,9 @@ export default async function AdminPage() {
                 {organizations.map((org) => (
                   <tr key={org.id} className="hover:bg-surface-2/50">
                     <td className="px-5 py-3 font-medium text-foreground">
-                      {org.name}
+                      <Link href={`/admin/organizacoes/${org.id}`} className="hover:text-gold-soft hover:underline">
+                        {org.name}
+                      </Link>
                     </td>
                     <td className="px-5 py-3 text-muted">{org.slug}</td>
                     <td className="px-5 py-3">
@@ -96,30 +124,9 @@ export default async function AdminPage() {
                         href={`/admin/organizacoes/${org.id}`}
                         className="block text-gold-soft hover:underline"
                       >
-                        Configurar módulos
+                        Abrir detalhes
                       </Link>
-                      {org.status === "active" ? (
-                        <details>
-                          <summary className="cursor-pointer text-muted">
-                            Suspender
-                          </summary>
-                          <form action={setOrganizationStatusAction} className="mt-2">
-                            <input type="hidden" name="organizationId" value={org.id} />
-                            <input type="hidden" name="status" value="inactive" />
-                            <SubmitButton variant="danger" size="sm" pendingLabel="Suspendendo…">
-                              Confirmar suspensão
-                            </SubmitButton>
-                          </form>
-                        </details>
-                      ) : (
-                        <form action={setOrganizationStatusAction}>
-                          <input type="hidden" name="organizationId" value={org.id} />
-                          <input type="hidden" name="status" value="active" />
-                          <SubmitButton variant="secondary" size="sm" pendingLabel="Reativando…">
-                            Reativar
-                          </SubmitButton>
-                        </form>
-                      )}
+                      <OrganizationStatusForm organization={org} />
                     </td>
                   </tr>
                 ))}
@@ -130,12 +137,10 @@ export default async function AdminPage() {
       )}
 
       <p className="text-xs text-muted-2">
-        Suspender uma organização bloqueia o acesso dos membros sem apagar dados;
-        reativar restaura as permissões e os módulos. Criar organizações e a situação das
-        integrações chegam em uma etapa futura. Esta área é distinta do papel
-        de proprietário de uma organização: o acesso é controlado pelo campo
-        <code className="mx-1 text-gold-soft">is_platform_admin</code> e
-        verificado no servidor.
+        {organizations.length > 0 &&
+          `${organizations.length} ${organizations.length === 1 ? "organização" : "organizações"}${filtered ? " encontrada(s)" : ""}. `}
+        Suspender uma organização bloqueia o acesso dos membros sem apagar dados; reativar restaura as permissões e os
+        módulos. Esta área é só de administração: conversas, contatos e dados dos clientes finais não aparecem aqui.
       </p>
     </div>
   );

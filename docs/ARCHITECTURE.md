@@ -33,7 +33,7 @@ src/
       visao-geral/  conversas/  contatos/  fluxos/  campanhas/  equipe/
       configuracoes/
       modulo-indisponivel/  # módulo não habilitado para a organização ativa
-    (platform-admin)/admin/  # admin da plataforma (is_platform_admin), sem exigir organização ativa
+    (platform-admin)/admin/  # central de organizações (is_platform_admin), sem exigir organização ativa; ver docs/ADMIN-PLATAFORMA.md
       organizacoes/[organizationId]/  # módulos de uma organização
     sem-organizacao/     # usuário autenticado sem vínculo com organização
     organizacao-suspensa/  # vínculo ativo, mas a organização está suspensa

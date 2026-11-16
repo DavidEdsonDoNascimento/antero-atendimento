@@ -99,7 +99,7 @@ Páginas para começar: `/login` → `/visao-geral` → `/conversas` (filtros,
 se o módulo estiver habilitado) → `/equipe` → `/configuracoes` → `/admin` (só
 administrador da plataforma). Mensagens de clientes entram só pelo simulador
 (`/simulador`, em `pnpm dev`); não há WhatsApp real. Organização nova nasce sem módulos:
-habilite-os em `/admin` (`docs/MODULES.md`).
+habilite-os em `/admin` (`docs/MODULES.md`, `docs/ADMIN-PLATAFORMA.md`).
 
 E-mails (recuperação de senha) chegam ao Mailpit: http://127.0.0.1:55426.
 

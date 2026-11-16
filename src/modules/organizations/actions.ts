@@ -27,7 +27,8 @@ export async function setOrganizationStatusAction(formData: FormData): Promise<v
     status: formData.get("status"),
   });
   await setOrganizationStatus({ userId: profile.id, ...input });
-  revalidatePath("/admin");
+  // A lista e o detalhe de cada organização mostram a situação.
+  revalidatePath("/admin", "layout");
 }
 
 const moduleInputSchema = z.object({

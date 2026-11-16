@@ -1,13 +1,16 @@
 import { Header } from "@/components/layout/header";
 import { Sidebar } from "@/components/layout/sidebar";
 import { SignOutForm } from "@/components/layout/sign-out-form";
-import { Logo } from "@/components/ui/logo";
+import { PlatformBadge } from "@/components/layout/org-badge";
 import { getActiveContext, requirePlatformAdmin } from "@/lib/auth/dal";
 
 /**
  * Admin da plataforma fora do layout de `(platform)`, que exige organização
  * ativa: o papel não depende de vínculo, e quem pertence só a uma organização
- * suspensa precisa continuar chegando aqui para reativá-la.
+ * suspensa precisa continuar chegando aqui para reativá-la. O cabeçalho mostra
+ * "Administração da plataforma", não a organização ativa de quem administra:
+ * aqui nenhuma organização é a ativa, e abrir uma na lista não troca a dos
+ * módulos operacionais (o menu lateral continua sendo o da própria organização).
  */
 export default async function PlatformAdminLayout({
   children,
@@ -23,7 +26,6 @@ export default async function PlatformAdminLayout({
       <div className="flex min-w-0 flex-1 flex-col">
         {context ? (
           <Header
-            organization={context.organization}
             fullName={profile.full_name ?? ""}
             email={profile.email}
             isPlatformAdmin
@@ -31,7 +33,7 @@ export default async function PlatformAdminLayout({
           />
         ) : (
           <header className="flex items-center justify-between gap-4 border-b border-line px-4 py-3 md:px-6">
-            <Logo />
+            <PlatformBadge />
             <SignOutForm />
           </header>
         )}

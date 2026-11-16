@@ -4,15 +4,19 @@ import { AccessDeniedError, sqlStateOf, withUserTransaction } from "@/lib/db";
 import type { ActiveContext } from "@/lib/auth/dal";
 import type {
   MemberRole,
+  MemberStatus,
   Organization,
   OrganizationModule,
   OrganizationStatus,
   Profile,
+  WhatsappProvider,
+  WhatsappStatus,
 } from "@/lib/types/database";
 
 // Extensão .ts explícita nas importações de VALOR (ver nota em
 // modules/conversations/cursor.ts).
 import { ModuleDependencyError, OrganizationNotFoundError } from "./errors.ts";
+import { FOLD_FROM, FOLD_TO, organizationSearchPattern } from "./search.ts";
 
 /**
  * Consultas de organização sobre o PostgreSQL próprio (Entrega 4; usadas
@@ -38,15 +42,26 @@ function queryFailure(prefix: string, error: unknown): unknown {
  * deliberada: aqui o papel é conferido no banco (`public.is_platform_admin`)
  * e quem não é administrador recebe `AccessDeniedError`, em vez das próprias
  * organizações que a RLS deixaria ver.
+ *
+ * `filter.search` (já tratado por `parseOrganizationSearch`) procura no nome e
+ * no identificador, sem diferenciar acento nem caixa; `filter.status` só aceita
+ * o enum. Os dois viajam como parâmetros, nunca dentro do texto do SQL.
  */
-export async function listAllOrganizations(context: { userId: string }): Promise<Organization[]> {
+export async function listAllOrganizations(
+  context: { userId: string },
+  filter: { search?: string; status?: OrganizationStatus } = {},
+): Promise<Organization[]> {
   try {
     return await withUserTransaction(context?.userId, async (tx) => {
       const { rows } = await tx.query<{ allowed: boolean }>("SELECT public.is_platform_admin() AS allowed");
       if (rows[0]?.allowed !== true) throw new AccessDeniedError();
       return (
         await tx.query<Organization>(
-          `SELECT ${ORGANIZATION_COLUMNS} FROM public.organizations o ORDER BY o.created_at DESC, o.id DESC`,
+          `SELECT ${ORGANIZATION_COLUMNS} FROM public.organizations o
+           WHERE ($1::text IS NULL OR lower(translate(o.name || ' ' || o.slug, $2::text, $3::text)) LIKE $1::text ESCAPE '\\')
+             AND ($4::public.organization_status IS NULL OR o.status = $4::public.organization_status)
+           ORDER BY o.created_at DESC, o.id DESC`,
+          [filter.search ? organizationSearchPattern(filter.search) : null, FOLD_FROM, FOLD_TO, filter.status ?? null],
         )
       ).rows;
     });
@@ -179,6 +194,75 @@ export async function setOrganizationModule(context: {
     if (sqlState === "23514") throw new ModuleDependencyError();
     if (sqlState === "P0002") throw new OrganizationNotFoundError();
     throw queryFailure("Falha ao alterar o módulo da organização", error);
+  }
+}
+
+export type OrganizationAdminMember = {
+  id: string;
+  role: MemberRole;
+  status: MemberStatus;
+  created_at: string;
+  full_name: string | null;
+  email: string | null;
+};
+
+export type OrganizationAdminChannel = {
+  id: string;
+  provider: WhatsappProvider;
+  status: WhatsappStatus;
+  display_name: string | null;
+  phone_number: string | null;
+};
+
+export type OrganizationAdminDetails = {
+  members: OrganizationAdminMember[];
+  channels: OrganizationAdminChannel[];
+};
+
+/**
+ * Equipe e canais de uma organização para a central do admin da plataforma —
+ * sem exigir vínculo e sem criar nenhum. Só leitura, só dados cadastrais que a
+ * RLS já entrega ao admin da plataforma (`organization_members`, `profiles`,
+ * `whatsapp_accounts`); conversas, contatos e automações NÃO são consultados
+ * (as políticas de 0004/0010 exigem vínculo). Colunas explícitas: credenciais
+ * e identificadores técnicos do canal não saem daqui. `null` se a organização
+ * não existe.
+ */
+export async function getOrganizationAdminDetails(context: {
+  userId: string;
+  organizationId: string;
+}): Promise<OrganizationAdminDetails | null> {
+  try {
+    return await withUserTransaction(context?.userId, async (tx) => {
+      const { rows } = await tx.query<{ allowed: boolean }>("SELECT public.is_platform_admin() AS allowed");
+      if (rows[0]?.allowed !== true) throw new AccessDeniedError();
+      const exists = (
+        await tx.query("SELECT 1 FROM public.organizations o WHERE o.id = $1::uuid", [context.organizationId])
+      ).rows.length;
+      if (exists === 0) return null;
+      const members = (
+        await tx.query<OrganizationAdminMember>(
+          `SELECT m.id, m.role, m.status, m.created_at, p.full_name, p.email
+           FROM public.organization_members m
+           LEFT JOIN public.profiles p ON p.id = m.user_id
+           WHERE m.organization_id = $1::uuid
+           ORDER BY (m.status = 'active') DESC, m.created_at ASC, m.id ASC`,
+          [context.organizationId],
+        )
+      ).rows;
+      const channels = (
+        await tx.query<OrganizationAdminChannel>(
+          `SELECT w.id, w.provider, w.status, w.display_name, w.phone_number
+           FROM public.whatsapp_accounts w
+           WHERE w.organization_id = $1::uuid
+           ORDER BY w.created_at ASC, w.id ASC`,
+          [context.organizationId],
+        )
+      ).rows;
+      return { members, channels };
+    });
+  } catch (error) {
+    throw queryFailure("Falha ao carregar os dados da organização", error);
   }
 }
 
