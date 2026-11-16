@@ -82,11 +82,11 @@ SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET created_at = now() WHERE id = {org_a}$q$)$$, '42501', NULL, 'owner NÃO altera created_at');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET updated_at = now() WHERE id = {org_a}$q$)$$, '42501', NULL, 'owner NÃO altera updated_at diretamente');
 SELECT throws_ok($$SELECT pg_temp.does('platform', $q$UPDATE public.organizations SET status = 'inactive' WHERE id = {org_a}$q$)$$, '42501', NULL, 'nem o admin da plataforma altera status sem a operação oficial');
-SELECT is(pg_temp.does('a_admin', $q$UPDATE public.organizations SET name = 'Org A' WHERE id = {org_a}$q$), 1::bigint, 'admin ainda altera o nome da própria organização');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org A' WHERE id = {org_a}$q$), 1::bigint, 'owner ainda altera o nome da própria organização');
-SELECT is(pg_temp.does('a_att', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$), 0::bigint, 'atendente NÃO altera o nome');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$), 0::bigint, 'owner de A NÃO altera o nome de B');
-SELECT is(pg_temp.does('platform', $q$UPDATE public.organizations SET name = 'Org B' WHERE id = {org_b}$q$), 1::bigint, 'admin da plataforma altera o nome de qualquer organização');
+SELECT throws_ok($$SELECT pg_temp.does('a_admin', $q$UPDATE public.organizations SET name = 'Org A' WHERE id = {org_a}$q$)$$, '42501', NULL, 'admin NÃO altera o nome da própria organização (G2A)');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org A' WHERE id = {org_a}$q$)$$, '42501', NULL, 'owner NÃO altera o nome da própria organização (G2A)');
+SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$)$$, '42501', NULL, 'atendente NÃO altera o nome');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$)$$, '42501', NULL, 'owner de A NÃO altera o nome de B');
+SELECT throws_ok($$SELECT pg_temp.does('platform', $q$UPDATE public.organizations SET name = 'Org B' WHERE id = {org_b}$q$)$$, '42501', NULL, 'admin da plataforma NÃO renomeia por UPDATE direto (G2A)');
 
 -- ---------------------------------------------------------------------------
 -- whatsapp_accounts: nenhuma escrita direta pela aplicação
@@ -127,7 +127,7 @@ SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.profiles WHERE id = {a_own
 SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.profiles WHERE id = {a_att}'), 1::bigint, 'suspensa: usuário ainda lê o próprio perfil (identidade separada da autorização)');
 
 -- Tentativas de escrita após a suspensão.
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$), 0::bigint, 'suspensa: owner NÃO altera o nome');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_a}$q$)$$, '42501', NULL, 'suspensa: owner NÃO altera o nome');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET status = 'active' WHERE id = {org_a}$q$)$$, '42501', NULL, 'suspensa: owner NÃO reativa');
 SELECT throws_ok($$SELECT pg_temp.does('a_admin', $q$UPDATE public.organizations SET status = 'active' WHERE id = {org_a}$q$)$$, '42501', NULL, 'suspensa: admin NÃO reativa');
 SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.organizations SET status = 'active' WHERE id = {org_a}$q$)$$, '42501', NULL, 'suspensa: atendente NÃO reativa');
@@ -174,7 +174,7 @@ UPDATE public.organizations SET status = 'active' WHERE id = pg_temp.id('org_a')
 
 SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.messages'), 1::bigint, 'reativada: atendente lê as mesmas mensagens');
 SELECT is(pg_temp.sees('a_owner', 'SELECT 1 FROM public.organization_members'), 6::bigint, 'reativada: vínculos preservados');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org A' WHERE id = {org_a}$q$), 1::bigint, 'reativada: owner volta a editar o nome');
+SELECT ok(pg_temp.sees('a_owner', 'SELECT 1 FROM public.organizations WHERE id = {org_a}') = 1, 'reativada: owner volta a ver a organização (renomear não existe mais pela aplicação, G2A)');
 SELECT is(pg_temp.sees('a_disabled', 'SELECT 1 FROM public.conversations'), 0::bigint, 'reativada: desativado continua sem acesso');
 
 SELECT * FROM finish();

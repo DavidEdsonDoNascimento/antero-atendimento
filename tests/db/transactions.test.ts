@@ -68,18 +68,21 @@ async function assertNoLeftoverContext(label: string) {
   assert.equal(inTransaction.raw_user, "", `${label}: app.user_id vazio numa transação nova`);
 }
 
-async function orgName(id: string) {
-  return (await fixture.query("SELECT name FROM public.organizations WHERE id = $1", [id])).rows[0].name;
+// A escrita usada para provar COMMIT/ROLLBACK é o nome do PRÓPRIO perfil
+// (profiles_update_own): desde a G2A é a única escrita direta que a aplicação tem.
+async function profileName(id: string) {
+  return (await fixture.query("SELECT full_name FROM public.profiles WHERE id = $1", [id])).rows[0].full_name;
 }
+const RENAME_SELF = "UPDATE public.profiles SET full_name = $2 WHERE id = $1";
 
 test("commit: a alteração persiste e o contexto termina com a transação", async () => {
   const result = await withUserTransaction(f!.users.aOwner, async (tx) => {
-    const updated = await tx.query("UPDATE public.organizations SET name = 'Org A (commit)' WHERE id = $1", [f!.orgA]);
+    const updated = await tx.query(RENAME_SELF, [f!.users.aOwner, "A Owner (commit)"]);
     return { rowCount: updated.rowCount, me: await whoAmI(tx) };
   });
   assert.equal(result.rowCount, 1);
   assert.equal(result.me.uid, f!.users.aOwner);
-  assert.equal(await orgName(f!.orgA), "Org A (commit)");
+  assert.equal(await profileName(f!.users.aOwner), "A Owner (commit)");
   await assertNoLeftoverContext("após commit");
 });
 
@@ -88,13 +91,13 @@ test("exceção no callback: ROLLBACK, o MESMO erro é propagado e a conexão vo
   let pid = 0;
   await assert.rejects(
     withUserTransaction(f!.users.aOwner, async (tx) => {
-      await tx.query("UPDATE public.organizations SET name = 'Org A (desfeita)' WHERE id = $1", [f!.orgA]);
+      await tx.query(RENAME_SELF, [f!.users.aOwner, "A Owner (desfeita)"]);
       pid = (await whoAmI(tx)).pid;
       throw boom;
     }),
     (error) => error === boom,
   );
-  assert.equal(await orgName(f!.orgA), "Org A (commit)", "a alteração foi desfeita");
+  assert.equal(await profileName(f!.users.aOwner), "A Owner (commit)", "a alteração foi desfeita");
   await assertNoLeftoverContext("após exceção");
   assert.equal((await leftoverContext()).autocommit.pid, pid, "a conexão foi reaproveitada, não descartada");
 });
@@ -102,14 +105,14 @@ test("exceção no callback: ROLLBACK, o MESMO erro é propagado e a conexão vo
 test("erro do banco no callback (privilégio/RLS): ROLLBACK e erro com o SQLSTATE original", async () => {
   await assert.rejects(
     withUserTransaction(f!.users.aOwner, async (tx) => {
-      await tx.query("UPDATE public.organizations SET name = 'Org A (antes do erro)' WHERE id = $1", [f!.orgA]);
+      await tx.query(RENAME_SELF, [f!.users.aOwner, "A Owner (antes do erro)"]);
       await tx.query("INSERT INTO public.contacts (organization_id, phone_number) VALUES ($1, '+5511955559999')", [
         f!.orgA,
       ]);
     }),
     { code: "42501" },
   );
-  assert.equal(await orgName(f!.orgA), "Org A (commit)");
+  assert.equal(await profileName(f!.users.aOwner), "A Owner (commit)");
   await assertNoLeftoverContext("após erro do banco");
 });
 

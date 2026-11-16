@@ -64,19 +64,15 @@ test("usuário de B não vê A, nem buscando pelo id exato", async () => {
 });
 
 test("usuário de A não altera nem apaga dados de B (0 linhas ou recusa igual para qualquer alvo, sem vazar existência)", async () => {
-  const update = await withUserTransaction(f!.users.aOwner, async (tx) =>
-    (await tx.query("UPDATE public.organizations SET name = 'invasão' WHERE id = $1", [f!.orgB])).rowCount,
-  );
-  assert.equal(update, 0);
-  // Vínculos não têm escrita direta (G2A): a recusa é a mesma para B, para a
-  // própria A e para uma organização inexistente, então não revela nada.
+  // Organizações e vínculos não têm escrita direta (G2A): a recusa é a mesma
+  // para B, para a própria A e para uma organização inexistente, então não revela nada.
   for (const organizationId of [f!.orgB, f!.orgA, randomUUID()]) {
-    await assert.rejects(
-      withUserTransaction(f!.users.aOwner, (tx) =>
-        tx.query("DELETE FROM public.organization_members WHERE organization_id = $1", [organizationId]),
-      ),
-      { code: "42501" },
-    );
+    for (const sql of [
+      "UPDATE public.organizations SET name = 'invasão' WHERE id = $1",
+      "DELETE FROM public.organization_members WHERE organization_id = $1",
+    ]) {
+      await assert.rejects(withUserTransaction(f!.users.aOwner, (tx) => tx.query(sql, [organizationId])), { code: "42501" });
+    }
   }
   const name = (await fixture.query("SELECT name FROM public.organizations WHERE id = $1", [f!.orgB])).rows[0].name;
   assert.equal(name, "Org B Integração");
@@ -112,12 +108,15 @@ test("usuário sem organização não acessa dados de terceiros", async () => {
 });
 
 test("atendente lê a própria organização mas não altera configurações", async () => {
-  const result = await withUserTransaction(f!.users.aAttendant, async (tx) => ({
-    a: await visible(tx, [f!.orgA]),
-    update: (await tx.query("UPDATE public.organizations SET name = 'atendente' WHERE id = $1", [f!.orgA])).rowCount,
-  }));
+  const result = await withUserTransaction(f!.users.aAttendant, async (tx) => ({ a: await visible(tx, [f!.orgA]) }));
   assert.equal(result.a.messages, 1);
-  assert.equal(result.update, 0);
+  // Nem renomear: organizations é só leitura para a aplicação (G2A).
+  await assert.rejects(
+    withUserTransaction(f!.users.aAttendant, (tx) =>
+      tx.query("UPDATE public.organizations SET name = 'atendente' WHERE id = $1", [f!.orgA]),
+    ),
+    { code: "42501" },
+  );
 });
 
 test("id de usuário inexistente (UUID válido) não concede acesso", async () => {

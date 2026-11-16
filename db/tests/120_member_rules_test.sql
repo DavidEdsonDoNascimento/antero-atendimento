@@ -6,7 +6,7 @@
 --    superusuário do banco descartável faz o papel do dono das tabelas): o
 --    gatilho vale para qualquer papel. Concorrência e REPEATABLE READ ficam em
 --    tests/db/member-rules.test.ts (precisam de duas conexões).
--- 3) O que precisa continuar: leitura dos vínculos, renomear a organização,
+-- 3) O que precisa continuar: leitura dos vínculos (membro e admin global),
 --    suspender/reativar e módulos pelo admin da plataforma.
 --
 -- Cenário: A (owner, admin, atendente, admin desativado), B (owner), C (sem
@@ -63,7 +63,7 @@ $$;
 -- ---------------------------------------------------------------------------
 SELECT table_privs_are('public', 'organization_members', 'antero_app', ARRAY['SELECT'], 'antero_app só lê organization_members');
 SELECT table_privs_are('public', 'organizations', 'antero_app', ARRAY['SELECT'], 'antero_app sem INSERT/UPDATE/DELETE de tabela em organizations');
-SELECT ok(has_column_privilege('antero_app', 'public.organizations', 'name', 'UPDATE'), 'organizations: UPDATE só da coluna name continua (renomear, política organizations_update)');
+SELECT ok(NOT has_column_privilege('antero_app', 'public.organizations', 'name', 'UPDATE'), 'organizations: nem renomear (sem UPDATE em name)');
 SELECT ok(
   NOT has_column_privilege('antero_app', 'public.organizations', 'status', 'UPDATE')
   AND NOT has_column_privilege('antero_app', 'public.organizations', 'slug', 'UPDATE')
@@ -88,7 +88,7 @@ SELECT ok(
   'antero_app não herda privilégios de nenhum papel'
 );
 SELECT policies_are('public', 'organization_members', ARRAY['organization_members_select'], 'organization_members: só a política de leitura');
-SELECT policies_are('public', 'organizations', ARRAY['organizations_select', 'organizations_update'], 'organizations: sem políticas de INSERT/DELETE');
+SELECT policies_are('public', 'organizations', ARRAY['organizations_select'], 'organizations: só a política de leitura');
 SELECT has_trigger('public', 'organization_members', 'organization_members_ensure_active_owner', 'gatilho de owner ativo existe');
 SELECT is_definer('public', 'ensure_active_owner', ARRAY[]::name[], 'ensure_active_owner é SECURITY DEFINER');
 SELECT is(
@@ -211,8 +211,8 @@ SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.organization_members WHERE
 SELECT is(pg_temp.sees('a_att', 'SELECT 1 FROM public.organization_members WHERE organization_id = {org_b}'), 0::bigint, 'membro de A não lê vínculos de B');
 SELECT is(pg_temp.sees('platform', 'SELECT 1 FROM public.organization_members WHERE organization_id IN ({org_a}, {org_b})'), 5::bigint, 'admin da plataforma lê os vínculos de todas');
 SELECT is(pg_temp.sees('outsider', 'SELECT 1 FROM public.organization_members WHERE organization_id = {org_a}'), 0::bigint, 'sem vínculo em A: não lê');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org A renomeada' WHERE id = {org_a}$q$), 1::bigint, 'owner continua renomeando a própria organização');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$), 0::bigint, 'owner de A não renomeia B');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organizations SET name = 'Org A renomeada' WHERE id = {org_a}$q$)$$, '42501', NULL, 'owner NÃO renomeia a própria organização por UPDATE direto');
+SELECT throws_ok($$SELECT pg_temp.does('platform', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$)$$, '42501', NULL, 'admin da plataforma NÃO renomeia por UPDATE direto');
 SELECT is(pg_temp.app_value(pg_temp.id('platform'), pg_temp.fill($q$public.set_organization_status({org_b}, 'inactive')$q$)), 'inactive', 'admin da plataforma suspende pela função');
 SELECT is(pg_temp.app_value(pg_temp.id('platform'), pg_temp.fill($q$public.set_organization_status({org_b}, 'active')$q$)), 'active', 'admin da plataforma reativa pela função');
 SELECT is(pg_temp.app_value(pg_temp.id('platform'), pg_temp.fill($q$public.set_organization_module({org_b}, 'automacoes', true)$q$)), 'true', 'admin da plataforma habilita módulo pela função');
