@@ -37,13 +37,36 @@ acessar o schema `auth`.
 ### organizations
 `name`, `slug` (único), `status` (`active`/`inactive`). `inactive` significa
 **suspensa** (ver "Suspensão de organizações"). Pela aplicação, só `name` é
-editável; `status` muda apenas por `set_organization_status`.
+editável; `status` muda apenas por `set_organization_status`. Desde a G2A (0012)
+a aplicação não cria nem exclui organizações: isso é operação administrativa
+fora de `antero_app` (como dono das tabelas, `docs/SETUP.md`).
 
 ### organization_members
 Vínculo usuário↔organização com `role` (`owner`/`admin`/`attendant`) e `status`
 (`active`/`invited`/`disabled`). Índices em `user_id` e `organization_id`.
 Único por `(organization_id, user_id)`. O modelo permite um usuário em várias
 organizações no futuro; no MVP a interface usa a primeira associação ativa.
+
+**Somente leitura para a aplicação (G2A, 0012):** `antero_app` não tem INSERT,
+UPDATE nem DELETE, e as políticas de escrita foram removidas. Vínculos são
+criados e alterados por operação administrativa como dono das tabelas; gestão de
+equipe pela aplicação, quando existir, será por função `SECURITY DEFINER` com
+regras de papel.
+
+**Pelo menos um owner ativo:** o gatilho `organization_members_ensure_active_owner`
+(função `ensure_active_owner`) recusa (`23514`, `last_owner`) rebaixar, desativar,
+excluir ou mover o último owner ativo de uma organização, **para qualquer papel**,
+inclusive manutenção. Para trocar o owner: torne o novo owner ativo antes de
+alterar o antigo. Detalhes:
+
+- trava a linha da organização (`FOR NO KEY UPDATE`) e só então confere: duas
+  transações concorrentes se serializam e a segunda é recusada; em SERIALIZABLE o
+  SSI barra o conflito; em REPEATABLE READ a operação é recusada (`25001`), porque
+  veria um snapshot anterior à outra transação;
+- organização que **já** estava sem owner ativo não é travada;
+- excluir a organização inteira (cascata) é permitido;
+- excluir a identidade (`auth.users`) do último owner é recusado pela cascata;
+- `TRUNCATE` não é coberto (só o dono o executa).
 
 ### whatsapp_accounts
 Canal por organização: `provider` (`development`/`cloud_api`),
@@ -214,8 +237,8 @@ totalmente qualificadas.
 | Tabela | SELECT | INSERT | UPDATE | DELETE |
 |--------|--------|--------|--------|--------|
 | profiles | próprio, colega de org, admin plataforma | (gatilho) | próprio | — |
-| organizations | membro, admin plataforma | admin plataforma | admin da org, admin plataforma (só `name`) | admin plataforma |
-| organization_members | membro, admin plataforma | admin da org, admin plataforma | idem | idem |
+| organizations | membro, admin plataforma | — (0012) | admin da org, admin plataforma (só `name`) | — (0012) |
+| organization_members | membro, admin plataforma | — (0012) | — (0012) | — (0012) |
 | whatsapp_accounts | membro, admin plataforma | — | — | — |
 | organization_modules | membro, admin plataforma | — | — | — |
 | contacts | membro ativo da org | — | — | — |
@@ -326,6 +349,8 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0008_conversation_actions` | assumir, responder, resolver; `conversation_events` | 0007 |
 | `0009_automation_enums` | `message_type` `image`/`interactive`; eventos `automation_started`/`handed_off` | 0008 |
 | `0010_automations` | fluxos, versões imutáveis, sessões, execuções, `messages.payload`/`automation_execution_id`, funções de configuração e execução, RLS | 0009 |
+| `0011_automation_media` | imagens dos fluxos no PostgreSQL, `save_automation_media` | 0010 |
+| `0012_member_rules` | sem escrita direta de `antero_app` em `organization_members` e sem INSERT/DELETE em `organizations` (privilégios e políticas); gatilho de owner ativo | 0001–0011 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -451,23 +476,18 @@ deve afrouxá-la (aceitar contexto nulo, "usuário de sistema" global ou
    login, chamada pelas duas portas de entrada;
 4. `webhook_events` (Ciclo 4) registra a entrega bruta antes da ingestão.
 
-### Pendência obrigatória: regras herdadas de gerenciamento de membros
+### Regras herdadas de gerenciamento de membros (resolvido na G2A)
 
-Preservadas da migração sem alteração, mas **precisam de decisão de negócio
-antes de implementar o gerenciamento de membros/usuários** (telas ou ações
-de equipe):
+Até a 0011, as políticas herdadas de 0002 deixavam um `admin` ativo criar, alterar
+ou remover qualquer vínculo da própria organização (inclusive se promover a
+`owner`, rebaixar ou excluir o owner, trocar o `user_id` e o `created_at`, o que
+mudava a organização ativa de outra pessoa), e o admin da plataforma se vincular a
+qualquer organização e criar ou excluir organizações. A 0012 removeu essa escrita
+(privilégios e políticas) e acrescentou a garantia de owner ativo. Reproduções e
+testes: `db/tests/120_member_rules_test.sql`, `tests/db/member-rules.test.ts`.
 
-- `organization_members_update`: um `admin` ativo pode alterar o `role` de
-  qualquer vínculo da organização — inclusive promover alguém (ou a si
-  mesmo) a `owner` e rebaixar um `owner`;
-- `organization_members_delete`: um `admin` pode remover qualquer vínculo,
-  inclusive o de um `owner`, e uma organização pode ficar sem `owner`;
-- `organization_members_insert`: um `admin` pode criar vínculos com qualquer
-  papel, inclusive `owner`.
-
-Decidir (ex.: só `owner` gerencia `owner`/`admin`; pelo menos um `owner`
-ativo sempre) e implementar com nova migration + testes pgTAP. A E1A não alterou
-estas regras; elas só deixam de valer enquanto a organização estiver suspensa.
+Continua pendente decidir as regras de papéis (quem gerencia quem) para quando
+existir gestão de equipe pela aplicação; ela deve vir por função, não por DML.
 
 ## Camada de acesso da aplicação (Entrega 3)
 

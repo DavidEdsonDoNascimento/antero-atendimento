@@ -161,6 +161,7 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `071_organization_status_operation_test` | funções da suspensão: autorização, catálogo e privilégios efetivos |
 | `080_organization_modules_test` | módulos por organização: `has_module`, `set_organization_module`, RLS |
 | `090_conversation_actions_test` | assumir, responder, resolver e reabrir (0008), janela de 24 h, `conversation_events` |
+| `120_member_rules_test` | sem escrita direta em vínculos e organizações (0012), garantia de owner ativo, o que continua funcionando |
 
 ## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 
