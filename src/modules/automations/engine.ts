@@ -8,6 +8,7 @@ import {
   type FlowDefinition,
   type FlowStep,
   type HandoffStep,
+  type ImageStep,
   type MenuStep,
   type QuestionStep,
 } from "./definition.ts";
@@ -140,6 +141,11 @@ function menuAction(definition: FlowDefinition, menu: MenuStep): OutboundAction 
   };
 }
 
+/** Link público ou imagem enviada pelo painel (a validação garante exatamente um). */
+function imageSource(step: ImageStep): { url: string } | { mediaId: string } {
+  return step.mediaId !== undefined ? { mediaId: step.mediaId } : { url: step.url ?? "" };
+}
+
 /** Mostra um menu e atualiza a pilha de "voltar". */
 function presentMenu(turn: Turn, menu: MenuStep, { fromBack = false } = {}): EngineResult {
   const { state, definition } = turn;
@@ -180,7 +186,7 @@ function runFrom(turn: Turn, stepId: string): EngineResult {
         id = step.next;
         continue;
       case "image":
-        if (!turn.emit({ type: "image", url: step.url, ...(step.caption ? { caption: step.caption } : {}) })) {
+        if (!turn.emit({ type: "image", ...imageSource(step), ...(step.caption ? { caption: step.caption } : {}) })) {
           return turn.fail("output_limit");
         }
         id = step.next;

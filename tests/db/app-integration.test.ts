@@ -134,6 +134,8 @@ const SERVER_ACTION_FILES = [
   // E2A: atendimento (assumir, resolver, responder) e simulador (só dev/test).
   "src/modules/conversations/actions.ts",
   "src/modules/simulator/actions.ts",
+  // E3B: editor de automações (owner/admin; o banco confere de novo).
+  "src/modules/automations/editor-actions.ts",
 ];
 
 test("nenhum código da aplicação usa auth.api.* ou a instância do Better Auth fora de src/lib/identity", () => {

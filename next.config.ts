@@ -22,5 +22,10 @@ export default function nextConfig(phase: string): NextConfig {
     output: "standalone",
     // Não anuncia o framework em cada resposta.
     poweredByHeader: false,
+    experimental: {
+      // Envio de imagem dos fluxos pelo editor (até 5 MB, o limite da Cloud API,
+      // mais a folga do multipart). As demais ações continuam pequenas.
+      serverActions: { bodySizeLimit: "6mb" },
+    },
   };
 }

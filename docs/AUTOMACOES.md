@@ -1,9 +1,9 @@
-# Automações (E3A)
+# Automações (E3A motor, E3B editor)
 
 Motor genérico de fluxos de atendimento automatizado, executado hoje pelo
-simulador. Vale para qualquer organização com o módulo Automações: um fluxo é
-dado (JSON versionado), não código. Nenhuma regra, id ou texto de cliente está
-no motor.
+simulador, e editor self-service em `/fluxos` (E3B). Vale para qualquer
+organização com o módulo Automações: um fluxo é dado (JSON versionado), não
+código. Nenhuma regra, id ou texto de cliente está no motor nem no editor.
 
 ## Peças
 
@@ -14,15 +14,19 @@ no motor.
 | Ações | `modules/automations/actions.ts` | `text`, `image`, `list` — o que enviar, sem saber como; `toMessageRecord` gera o texto do histórico |
 | Cloud API | `modules/messaging/cloud-api.ts` | Corpo de `/messages` para cada ação e leitura de `list_reply`, sem transporte |
 | Executor | `modules/automations/runner.ts` | prepare → motor → commit (uma transação), repetido enquanto houver mensagem pendente; para cada resposta, trava de envio → provedor → resultado |
-| Configuração | `modules/automations/sql-commands.ts` | `saveFlowDraft`, `publishFlow`, `setFlowStatus` (contrato do editor E3B) |
-| Banco | `db/migrations/0009`, `0010` | Fluxos, versões, sessões, execuções, funções e RLS |
+| Configuração | `modules/automations/sql-commands.ts` | `createFlow`, `saveFlowDraft`/`saveFlowDraftById` (revisão esperada), `publishFlow`, `setFlowStatus`, `restoreFlowVersion`, `uploadFlowImage` |
+| Editor (puro) | `modules/automations/editor.ts` | Operações nas etapas e opções, ids estáveis, referências, erros e avisos em português a partir do schema |
+| Prévia (pura) | `modules/automations/preview.ts` | Conversa em memória pelo `startSession`/`advance` |
+| Telas | `app/(platform)/fluxos/` | Lista, criar, editor, histórico, versão, rota das imagens |
+| Ações | `modules/automations/editor-actions.ts` | Server Actions do editor (DAL + banco) |
+| Banco | `db/migrations/0009`, `0010`, `0011` | Fluxos, versões, sessões, execuções, imagens, funções e RLS |
 
 ## Tipos de etapa
 
 | Tipo | Espera o cliente | Comportamento |
 | --- | --- | --- |
 | `message` | não | Envia texto e segue para `next` |
-| `image` | não | Envia imagem (`https`) com legenda opcional e segue |
+| `image` | não | Envia imagem — enviada pelo painel (`mediaId`) **ou** link `https` (`url`), exatamente um — com legenda opcional e segue |
 | `menu` | sim | Lista interativa; opções com **id estável**, título (24), descrição (72), até 10 linhas somando "Voltar" e "Menu principal" |
 | `question` | sim | Coleta texto (`minLength`/`maxLength`) em `variable`, com o `label` que o atendente vê |
 | `handoff` | — | Encerra a automação e passa a conversa para a equipe |
@@ -60,6 +64,101 @@ editor (E3B) monta o JSON com o mesmo schema que o motor lê — a prévia roda 
 mesmo `advance`. O banco confere só o estrutural (objeto, `schemaVersion`,
 tamanho); a forma completa é do Zod, aplicado ao gravar, ao publicar e de novo
 ao executar.
+
+## Editor (E3B)
+
+`/fluxos` lista as automações (estado, versão em uso, alterações não publicadas,
+conversas em andamento) com pausar/reativar. Owner/admin criam e editam; os
+demais membros com o módulo só consultam a lista.
+
+- **Criar**: nome e "responder às conversas novas" (desabilitado se outra já
+  responde — a regra de um fluxo de entrada continua no banco, `AU001`). Começa
+  com boas-vindas → menu → falar com a equipe, já publicável.
+- **Editar por formulários**: lista de etapas (mover ↑↓, primeira etapa, menu
+  principal) e o formulário da etapa escolhida. Destinos são escolhidos pelo
+  nome da etapa, com opção de criar a etapa nova ali mesmo. Contadores mostram
+  os limites da Cloud API. Ids de etapa e de opção são gerados uma vez e nunca
+  mudam (renomear ou reordenar opções não altera o id); a chave da informação
+  coletada acompanha o nome só até a pergunta ser gravada.
+- **Nome da etapa** (`name`, opcional, até 60): só para organizar a tela; o
+  motor não lê. Campo novo, compatível com a v1.
+- **Excluir etapa**: o diálogo lista quem leva até ela. As referências ficam
+  apontando para a etapa excluída e viram erro até alguém escolher outro
+  destino — a navegação nunca muda sem o usuário ver.
+- **Configurações gerais**: primeira etapa, menu principal, palavras de atalho
+  (atendente, menu, voltar), nomes de "Voltar"/"Menu principal", mensagens
+  padrão e tentativas inválidas.
+
+### Erros e avisos
+
+`editorIssues` roda `flowDefinitionSchema` (o mesmo da publicação e do motor) e
+as regras do grafo de `definition.ts` — que agora têm um tipo (`GraphIssueKind`)
+e também rodam sobre o rascunho incompleto (`draftGraphIssues`), já que o Zod
+não executa o `superRefine` enquanto há campo inválido. O editor só traduz:
+cada problema vai para o campo (etapa, opção, configuração) com texto em
+português. **Erro** impede publicar; **aviso** (etapa que nenhum caminho
+alcança, `flowWarnings`) não impede nada. Nenhum dos dois impede salvar.
+
+### Rascunho e concorrência
+
+O rascunho pode ser gravado incompleto: `saveFlowDraft` grava a definição
+normalizada quando ela já é publicável e, senão, o rascunho como está, desde que
+seja uma definição v1 que o editor abre (`draftDefinitionSchema`). Publicar
+continua exigindo a definição inteira (`invalid_definition`).
+
+Cada gravação vai sobre a revisão que a tela carregou (`expectedRevision`):
+`save_automation_flow` trava a linha e incrementa a revisão; se ela não for a
+esperada + 1, outra gravação entrou antes e a transação é desfeita
+(`draft_changed`). A tela mostra o conflito e oferece recarregar — nada é
+sobrescrito. Publicar e restaurar também conferem a revisão. Não há colaboração
+em tempo real nem gravação automática; há aviso ao sair com alterações não
+salvas (navegador e links da aplicação).
+
+### Prévia
+
+"Testar conversa" abre um painel com a conversa do cliente, pelo motor real
+(`previewReply` → `startSession`/`advance`) sobre o rascunho atual, inclusive o
+não salvo. Só memória do navegador: nada é enviado nem gravado, nenhuma conversa
+aparece na Inbox. Mostra texto, imagem, menu (opções clicáveis), coleta,
+encaminhamento e conclusão, e avisa quando o fluxo mudou durante o teste. Sem o
+módulo Atendimento, mostra a mensagem de indisponibilidade, como na execução.
+
+A prévia **não consulta o estado** da automação: pausada, ela continua podendo
+ser testada (é o motor em memória). A pausa real vale só na operação, aplicada
+no banco (`flow_paused`, 0010). Por isso o editor mostra, enquanto pausada, um
+aviso fixo ("pausada, mas pode continuar sendo testada, sem enviar mensagens
+reais") e o painel da prévia repete o aviso. O indicador de entrada só diz
+"Responde às conversas novas" quando ativa; pausada, "Pausada: não responde…";
+ainda não publicada, "Responderá… ao publicar" (`entryIndicator`).
+
+Layout: a partir de 1400 px a prévia fica num painel ao lado e a página reserva o
+espaço; abaixo disso ocupa a tela toda (✕ fecha).
+
+### Publicação, histórico e restauração
+
+Publicar exige rascunho salvo e sem erros e confirma com um resumo (etapas,
+número da versão, "novas conversas usam esta versão"). O histórico mostra
+número, data, quem publicou e o conteúdo (só leitura). **Restaurar** carrega o
+conteúdo de uma versão como novo rascunho (nova revisão); nada é publicado e a
+versão antiga não muda. Publicar o restaurado cria uma versão nova. Sessões em
+andamento ficam na versão em que começaram.
+
+### Imagens (0011)
+
+Enviadas pelo editor (JPG/PNG, até 5 MB) e guardadas em `automation_media`, no
+próprio PostgreSQL, por organização: o projeto não tem armazenamento de objetos
+e o contêiner de produção é efêmero. O fluxo guarda só o id (`mediaId`), nunca
+o arquivo ou base64. O tipo é conferido pela assinatura do arquivo na aplicação
+e no banco; a mesma imagem enviada de novo é reaproveitada (sha256); cota de
+100 imagens / 100 MB por organização. Leitura pela rota autenticada
+`/fluxos/imagens/[mediaId]` (membro + Automações; RLS também aceita Atendimento).
+Imagens não são apagadas nem alteradas (uma versão publicada pode usá-las).
+O link `https` externo continua aceito.
+
+Envio real (E2C): a Cloud API não recebe o arquivo do nosso banco por link; o
+provedor `cloud_api` deve carregá-lo na Meta (`POST /{phone_number_id}/media`) e
+enviar pelo id da mídia lá. Até isso existir, `toCloudApiMessage` recusa ações
+com `mediaId` (erro explícito, nunca envio silencioso).
 
 ## Quando a automação age
 
@@ -166,7 +265,10 @@ Um fluxo de FAQ que termina em `end` não depende de humano.
 ## Segurança
 
 - Configurar: `save_automation_flow`, `publish_automation_flow`,
-  `set_automation_flow_status` — owner/admin com `has_module(org, 'automacoes')`.
+  `set_automation_flow_status`, `save_automation_media` — owner/admin com
+  `has_module(org, 'automacoes')`, organização ativa. As Server Actions do editor
+  tiram usuário e organização só do DAL; do formulário vêm o fluxo, a revisão e
+  o conteúdo. Fluxo de outra organização: "não encontrada" (RLS + filtro).
 - Executar: funções `*_internal` **sem EXECUTE** para nenhum papel. A única porta
   hoje é `dev_automation_*`: usuário autenticado, owner/admin ativo da
   organização da mensagem (organização ativa) e canal `development` (`AU009`
@@ -201,8 +303,16 @@ deve ser afrouxada para isso.
 | `AU008` | encaminhar sem o módulo Atendimento |
 | `AU009` | porta de desenvolvimento em canal real |
 | `AU010` | alterar versão publicada |
+| `AU011` | imagem vazia ou acima de 5 MB |
+| `AU012` | imagem que não é JPEG/PNG (pela assinatura) |
+| `AU013` | cota de imagens da organização |
 
 ## Usar no desenvolvimento
+
+Pelo editor: `/fluxos` → "Criar automação" → ajustar → "Testar conversa" →
+salvar → publicar. Com o fluxo de entrada ativo, o simulador responde com ele.
+
+Pela ferramenta de desenvolvimento:
 
 1. Habilite Automações para a organização em `/admin`.
 2. Em `/simulador`, card "Automação (dev)" → "Instalar fluxo demonstrativo"
@@ -211,6 +321,23 @@ deve ser afrouxada para isso.
    como atalhos) e na Inbox.
 
 ## Pendências
+
+Do editor (E3B):
+
+- Imagens não podem ser apagadas pela tela (podem estar em versões publicadas);
+  limpar órfãs exige rotina própria.
+- Envio de imagem enviada pelo painel pela Cloud API depende da E2C (upload na
+  Meta); hoje só o canal de desenvolvimento a "envia".
+- A publicação não confere que o `mediaId` de uma imagem pertence à organização
+  do fluxo (um POST manual poderia gravar o id de outra). Não vaza nada — a rota
+  e a RLS só entregam imagens da própria organização, e o id é um uuid aleatório —,
+  mas a E2C deve ler a imagem escopada pela organização ao enviá-la à Meta e
+  tratar a ausência como falha de envio.
+- Sem edição simultânea: conflito é detectado e recusado, não mesclado.
+- Tipos de pergunta são só texto livre com tamanho (o que o motor suporta);
+  data, número e opções fechadas ficam para depois.
+
+Do motor (E3A):
 
 - Entrada `selection` (id da lista) já existe no motor; o simulador e a ingestão
   ainda gravam só texto. A leitura de `list_reply` entra com a E3C.

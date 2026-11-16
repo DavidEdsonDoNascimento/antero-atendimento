@@ -7,7 +7,11 @@ export type ListRow = { id: string; title: string; description?: string };
 
 export type OutboundAction =
   | { type: "text"; text: string }
-  | { type: "image"; url: string; caption?: string }
+  /**
+   * `url`: link público. `mediaId`: imagem enviada pelo painel (`automation_media`);
+   * o provedor real a carrega na Meta antes de enviar (E2C).
+   */
+  | ({ type: "image"; caption?: string } & ({ url: string; mediaId?: never } | { mediaId: string; url?: never }))
   | {
       type: "list";
       header?: string;

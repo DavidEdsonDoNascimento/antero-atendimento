@@ -38,7 +38,8 @@ SELECT set_eq(
     'automation_begin_delivery_internal(uuid)', 'dev_automation_begin_delivery(uuid)',
     'assert_dev_automation_access(uuid)', 'dev_automation_prepare(uuid)',
     'dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
-    'dev_automation_record_delivery(uuid,message_delivery_status,text)'
+    'dev_automation_record_delivery(uuid,message_delivery_status,text)',
+    'save_automation_media(uuid,text,text,bytea)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );
@@ -82,7 +83,8 @@ SELECT set_eq(
     'public.set_automation_flow_status(uuid,uuid,automation_flow_status)', 'public.dev_automation_prepare(uuid)',
     'public.dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
     'public.dev_automation_record_delivery(uuid,message_delivery_status,text)',
-    'public.dev_automation_begin_delivery(uuid)'
+    'public.dev_automation_begin_delivery(uuid)',
+    'public.save_automation_media(uuid,text,text,bytea)'
   ],
   'antero_app executa exatamente as funções necessárias (gatilhos e set_updated_at fora)'
 );

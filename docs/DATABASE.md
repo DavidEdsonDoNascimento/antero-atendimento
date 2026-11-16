@@ -424,6 +424,15 @@ barra respostas pendentes se o módulo, a organização, o canal ou um atendente
 mudou. Regras e SQLSTATEs:
 `docs/AUTOMACOES.md`.
 
+### Imagens dos fluxos (0011, E3B)
+
+`automation_media`: imagens enviadas pelo editor, por organização (`content_type`
+JPEG/PNG, `byte_size` até 5 MB, `sha256` único por organização, `data` bytea).
+Escrita só por `save_automation_media` (owner/admin + Automações, organização
+ativa; tipo pela assinatura; cota 100 imagens/100 MB; `AU011`–`AU013`). Leitura
+por RLS: membro ativo com Automações ou Atendimento. O fluxo guarda só o id.
+Rollback recusado se houver imagem. Decisão e limites: `docs/AUTOMACOES.md`.
+
 ### Entrada de sistema (webhook/worker) — desenho futuro
 
 `ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo

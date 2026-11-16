@@ -536,7 +536,7 @@ test("módulos: menu e rotas seguem a organização ativa; URL direta é negada 
     const enabled = await owner.page("/fluxos");
     assert.equal(enabled.status, 200);
     assert.equal(enabled.redirect, null);
-    assert.match(enabled.html, /Nenhum fluxo publicado/);
+    assert.match(enabled.html, /Nenhuma automação ainda/);
 
     // A tela de indisponível não confia no parâmetro.
     const screen = await owner.page("/modulo-indisponivel?modulo=atendimento");
