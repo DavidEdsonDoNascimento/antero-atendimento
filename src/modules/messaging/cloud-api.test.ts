@@ -48,6 +48,11 @@ test("limites recusados antes do envio: linhas, títulos, botão e link", () => 
     CloudApiFormatError,
   );
   assert.throws(() => toCloudApiMessage("+5511900000001", { type: "image", url: "http://exemplo.invalid/a.jpg" }), CloudApiFormatError);
+  // Imagem enviada pelo painel: sem link público; o provedor real a carrega na Meta (E2C).
+  assert.throws(
+    () => toCloudApiMessage("+5511900000001", { type: "image", mediaId: "6f1c1a52-3d4e-4f60-8a7b-9c0d1e2f3a4b" }),
+    /carregue o arquivo na Meta/,
+  );
 });
 
 test("resposta selecionada da lista vira seleção pelo id estável", () => {

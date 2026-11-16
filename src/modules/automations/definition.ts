@@ -28,10 +28,13 @@ const optionId = z
 const variableKey = z.string().regex(/^[a-z][a-z0-9_]{0,39}$/, "variável: letra minúscula seguida de letras, dígitos ou _");
 const text = (max: number) => z.string().trim().min(1).max(max);
 const keywords = z.array(z.string().trim().min(1).max(60)).max(20);
+/** Nome da etapa no editor (E3B). Só organiza a tela: o motor não o lê nem o envia. */
+const stepName = z.string().trim().max(60).optional();
 
 const messageStep = z.object({
   type: z.literal("message"),
   id: stepId,
+  name: stepName,
   text: text(WHATSAPP_LIMITS.textBody),
   next: stepId,
 });
@@ -39,9 +42,14 @@ const messageStep = z.object({
 const imageStep = z.object({
   type: z.literal("image"),
   id: stepId,
+  name: stepName,
+  /** Link público (https). Ou `mediaId`: exatamente um dos dois. */
   url: z
     .url({ protocol: /^https$/ })
-    .max(WHATSAPP_LIMITS.imageUrl),
+    .max(WHATSAPP_LIMITS.imageUrl)
+    .optional(),
+  /** Imagem enviada pelo painel (`automation_media`, 0011), da mesma organização. */
+  mediaId: z.uuid().optional(),
   caption: text(WHATSAPP_LIMITS.imageCaption).optional(),
   next: stepId,
 });
@@ -59,6 +67,7 @@ const menuOption = z.object({
 const menuStep = z.object({
   type: z.literal("menu"),
   id: stepId,
+  name: stepName,
   header: text(WHATSAPP_LIMITS.listHeader).optional(),
   text: text(WHATSAPP_LIMITS.listBody),
   footer: text(WHATSAPP_LIMITS.listFooter).optional(),
@@ -75,6 +84,7 @@ const menuStep = z.object({
 const questionStep = z.object({
   type: z.literal("question"),
   id: stepId,
+  name: stepName,
   text: text(WHATSAPP_LIMITS.textBody),
   /** Onde a resposta fica guardada na sessão. */
   variable: variableKey,
@@ -89,6 +99,7 @@ const questionStep = z.object({
 const handoffStep = z.object({
   type: z.literal("handoff"),
   id: stepId,
+  name: stepName,
   /** Enviada antes de passar para a equipe. Sem ela, usa `settings.handoffMessage`. */
   text: text(WHATSAPP_LIMITS.textBody).optional(),
   /** Enviada quando a organização não tem atendimento humano. Sem ela, usa `settings.handoffUnavailableMessage`. */
@@ -100,6 +111,7 @@ const handoffStep = z.object({
 const endStep = z.object({
   type: z.literal("end"),
   id: stepId,
+  name: stepName,
   text: text(WHATSAPP_LIMITS.textBody).optional(),
 });
 
@@ -112,7 +124,7 @@ export const flowStepSchema = z.discriminatedUnion("type", [
   endStep,
 ]);
 
-const settingsSchema = z.object({
+export const flowSettingsSchema = z.object({
   /** Pedido explícito de atendente, reconhecido em qualquer etapa. */
   humanKeywords: keywords.default(["atendente", "humano", "falar com atendente", "falar com uma pessoa"]),
   mainMenuKeywords: keywords.default(["menu", "inicio", "menu principal"]),
@@ -137,23 +149,49 @@ const baseDefinitionSchema = z.object({
   entryStepId: stepId,
   /** Menu de "Menu principal" e do atalho por palavra. Sem ele, os dois ficam desligados. */
   mainMenuStepId: stepId.optional(),
-  settings: settingsSchema.prefault({}),
+  settings: flowSettingsSchema.prefault({}),
   steps: z.array(flowStepSchema).min(1).max(ENGINE_LIMITS.steps),
 });
 
 export const flowDefinitionSchema = baseDefinitionSchema.superRefine((definition, ctx) => {
-  for (const issue of graphIssues(definition)) ctx.addIssue({ code: "custom", message: issue.message, path: issue.path });
+  for (const issue of graphIssues(definition)) {
+    ctx.addIssue({ code: "custom", message: issue.message, path: issue.path, params: { kind: issue.kind, ...issue.params } });
+  }
 });
 
 export type FlowDefinition = z.infer<typeof flowDefinitionSchema>;
 export type FlowDefinitionInput = z.input<typeof flowDefinitionSchema>;
 export type FlowStep = z.infer<typeof flowStepSchema>;
+export type FlowStepInput = z.input<typeof flowStepSchema>;
 export type MenuStep = Extract<FlowStep, { type: "menu" }>;
 export type QuestionStep = Extract<FlowStep, { type: "question" }>;
 export type HandoffStep = Extract<FlowStep, { type: "handoff" }>;
 export type FlowSettings = FlowDefinition["settings"];
+export type ImageStep = Extract<FlowStep, { type: "image" }>;
 
-type GraphIssue = { message: string; path: (string | number)[] };
+/**
+ * Tipo de cada regra do grafo, para quem precisa explicar o problema com outras
+ * palavras (o editor) sem reescrever a regra.
+ */
+export type GraphIssueKind =
+  | "duplicate_step"
+  | "entry_missing"
+  | "main_menu_not_menu"
+  | "missing_target"
+  | "image_source"
+  | "min_over_max"
+  | "duplicate_option"
+  | "duplicate_title"
+  | "too_many_rows"
+  | "main_menu_required"
+  | "no_pause_cycle";
+
+export type GraphIssue = {
+  kind: GraphIssueKind;
+  message: string;
+  path: (string | number)[];
+  params?: Record<string, string | number>;
+};
 
 /** Linhas de navegação que um menu mostra além das opções. */
 export function navigationRowsOf(menu: Pick<MenuStep, "id" | "showBack" | "showMainMenu">, mainMenuStepId?: string): {
@@ -165,7 +203,7 @@ export function navigationRowsOf(menu: Pick<MenuStep, "id" | "showBack" | "showM
 }
 
 /** Destinos de uma etapa (para a validação do grafo). */
-function targetsOf(step: FlowStep): { id: string; path: (string | number)[] }[] {
+export function targetsOf(step: FlowStep): { id: string; path: (string | number)[] }[] {
   switch (step.type) {
     case "message":
     case "image":
@@ -189,37 +227,44 @@ function graphIssues(definition: z.infer<typeof baseDefinitionSchema>): GraphIss
   const issues: GraphIssue[] = [];
   const byId = new Map<string, FlowStep>();
   definition.steps.forEach((step, index) => {
-    if (byId.has(step.id)) issues.push({ message: `etapa duplicada: ${step.id}`, path: ["steps", index, "id"] });
+    if (byId.has(step.id)) issues.push({ kind: "duplicate_step", message: `etapa duplicada: ${step.id}`, path: ["steps", index, "id"] });
     else byId.set(step.id, step);
   });
 
   if (!byId.has(definition.entryStepId)) {
-    issues.push({ message: `etapa inicial inexistente: ${definition.entryStepId}`, path: ["entryStepId"] });
+    issues.push({ kind: "entry_missing", message: `etapa inicial inexistente: ${definition.entryStepId}`, path: ["entryStepId"] });
   }
   if (definition.mainMenuStepId !== undefined && byId.get(definition.mainMenuStepId)?.type !== "menu") {
-    issues.push({ message: "o menu principal precisa ser uma etapa de menu", path: ["mainMenuStepId"] });
+    issues.push({ kind: "main_menu_not_menu", message: "o menu principal precisa ser uma etapa de menu", path: ["mainMenuStepId"] });
   }
 
   definition.steps.forEach((step, index) => {
     for (const target of targetsOf(step)) {
       if (!byId.has(target.id)) {
-        issues.push({ message: `destino inexistente: ${target.id}`, path: ["steps", index, ...target.path] });
+        issues.push({ kind: "missing_target", message: `destino inexistente: ${target.id}`, path: ["steps", index, ...target.path] });
       }
     }
+    if (step.type === "image" && (step.url === undefined) === (step.mediaId === undefined)) {
+      issues.push({ kind: "image_source", message: "imagem: informe um link ou uma imagem enviada (só um)", path: ["steps", index, "mediaId"] });
+    }
     if (step.type === "question" && step.minLength > step.maxLength) {
-      issues.push({ message: "tamanho mínimo maior que o máximo", path: ["steps", index, "minLength"] });
+      issues.push({ kind: "min_over_max", message: "tamanho mínimo maior que o máximo", path: ["steps", index, "minLength"] });
     }
     if (step.type !== "menu") return;
     const ids = new Set<string>();
     const titles = new Set<string>();
     step.options.forEach((option, optionIndex) => {
       if (ids.has(option.id)) {
-        issues.push({ message: `opção duplicada: ${option.id}`, path: ["steps", index, "options", optionIndex, "id"] });
+        issues.push({ kind: "duplicate_option", message: `opção duplicada: ${option.id}`, path: ["steps", index, "options", optionIndex, "id"] });
       }
       ids.add(option.id);
       const title = normalizeText(option.title);
       if (titles.has(title)) {
-        issues.push({ message: `título de opção repetido: ${option.title}`, path: ["steps", index, "options", optionIndex, "title"] });
+        issues.push({
+          kind: "duplicate_title",
+          message: `título de opção repetido: ${option.title}`,
+          path: ["steps", index, "options", optionIndex, "title"],
+        });
       }
       titles.add(title);
     });
@@ -227,12 +272,14 @@ function graphIssues(definition: z.infer<typeof baseDefinitionSchema>): GraphIss
     const rows = step.options.length + Number(nav.back) + Number(nav.main);
     if (rows > 10) {
       issues.push({
+        kind: "too_many_rows",
         message: `o menu ${step.id} tem ${rows} linhas; o WhatsApp aceita até 10 (opções + navegação)`,
         path: ["steps", index, "options"],
+        params: { rows },
       });
     }
     if (step.showMainMenu && definition.mainMenuStepId === undefined) {
-      issues.push({ message: "\"Menu principal\" exige mainMenuStepId", path: ["steps", index, "showMainMenu"] });
+      issues.push({ kind: "main_menu_required", message: "\"Menu principal\" exige mainMenuStepId", path: ["steps", index, "showMainMenu"] });
     }
   });
 
@@ -251,11 +298,25 @@ function graphIssues(definition: z.infer<typeof baseDefinitionSchema>): GraphIss
   definition.steps.forEach((step, index) => {
     if (state.has(step.id)) return;
     if (visit(step.id)) {
-      issues.push({ message: `ciclo sem pausa a partir de ${step.id}: nenhuma etapa espera o cliente`, path: ["steps", index] });
+      issues.push({
+        kind: "no_pause_cycle",
+        message: `ciclo sem pausa a partir de ${step.id}: nenhuma etapa espera o cliente`,
+        path: ["steps", index],
+      });
     }
   });
 
   return issues;
+}
+
+/**
+ * As mesmas regras do grafo, sobre um rascunho que ainda não passa por campo
+ * (o Zod não roda o `superRefine` enquanto há campo inválido). O editor mostra
+ * assim, de uma vez, um destino excluído e um texto em branco. O rascunho deve
+ * ter as listas e marcações dos menus preenchidas (o editor as completa).
+ */
+export function draftGraphIssues(draft: FlowDefinitionInput): GraphIssue[] {
+  return graphIssues(draft as z.infer<typeof baseDefinitionSchema>);
 }
 
 export type DefinitionValidation =
@@ -270,4 +331,53 @@ export function parseFlowDefinition(input: unknown): DefinitionValidation {
     ok: false,
     issues: result.error.issues.map((issue) => ({ path: issue.path.join("."), message: issue.message })),
   };
+}
+
+/**
+ * Forma mínima de um RASCUNHO. O editor grava trabalho incompleto (opção ainda
+ * sem destino, texto em branco); só a publicação exige `flowDefinitionSchema`
+ * inteiro. Isto não é outra validação do fluxo: confere apenas que é uma
+ * definição v1 que o editor consegue abrir de novo.
+ */
+export const draftDefinitionSchema = z.looseObject({
+  schemaVersion: z.literal(FLOW_SCHEMA_VERSION),
+  entryStepId: z.string().max(64),
+  mainMenuStepId: z.string().max(64).optional(),
+  settings: z.looseObject({}).optional(),
+  steps: z
+    .array(
+      z.looseObject({
+        type: z.enum(["message", "image", "menu", "question", "handoff", "end"]),
+        id: stepId,
+      }),
+    )
+    .max(ENGINE_LIMITS.steps),
+});
+
+export type FlowDraft = z.infer<typeof draftDefinitionSchema>;
+
+export function parseFlowDraft(input: unknown): { ok: true; draft: FlowDraft } | { ok: false } {
+  const result = draftDefinitionSchema.safeParse(input);
+  return result.success ? { ok: true, draft: result.data } : { ok: false };
+}
+
+export type FlowWarning = { kind: "unreachable"; stepId: string };
+
+/**
+ * Avisos de um fluxo VÁLIDO que não impedem publicar: etapas que nenhum caminho
+ * alcança a partir do início (nem pelo menu principal, que o cliente abre por
+ * palavra). Ficam no fluxo sem efeito — quase sempre esquecimento.
+ */
+export function flowWarnings(definition: FlowDefinition): FlowWarning[] {
+  const byId = new Map(definition.steps.map((step) => [step.id, step]));
+  const reached = new Set<string>();
+  const pending = [definition.entryStepId, ...(definition.mainMenuStepId ? [definition.mainMenuStepId] : [])];
+  while (pending.length > 0) {
+    const id = pending.pop()!;
+    const step = byId.get(id);
+    if (!step || reached.has(id)) continue;
+    reached.add(id);
+    for (const target of targetsOf(step)) pending.push(target.id);
+  }
+  return definition.steps.filter((step) => !reached.has(step.id)).map((step) => ({ kind: "unreachable", stepId: step.id }));
 }

@@ -34,6 +34,11 @@ export function toCloudApiMessage(to: string, action: OutboundAction): CloudApiM
       limit(action.text, WHATSAPP_LIMITS.textBody, "texto");
       return { ...base, type: "text", text: { body: action.text, preview_url: false } };
     case "image":
+      // Imagem enviada pelo painel: a Cloud API precisa do id da mídia NA META,
+      // obtido carregando o arquivo (`POST /{phone_number_id}/media`) — E2C.
+      if (action.mediaId !== undefined) {
+        throw new CloudApiFormatError("imagem do painel: carregue o arquivo na Meta e envie pelo id da mídia (E2C)");
+      }
       if (!/^https:\/\//.test(action.url) || action.url.length > WHATSAPP_LIMITS.imageUrl) {
         throw new CloudApiFormatError("imagem: link https de até 2000 caracteres");
       }
