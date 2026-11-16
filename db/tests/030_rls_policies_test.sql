@@ -1,4 +1,4 @@
--- Antero Atendimentos — Entrega 2: as políticas de RLS (14 desde a E1A), testadas por
+-- Antero Atendimentos — Entrega 2: as políticas de RLS (16 desde a G2A), testadas por
 -- COMPORTAMENTO (não basta a política existir).
 --
 -- Cenário: duas organizações (A e B), membros de A em todos os papéis e
@@ -76,15 +76,13 @@ SELECT ok(
                    'public.automation_media'::regclass)),
   'RLS habilitada nas 14 tabelas de negócio'
 );
-SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 21, 'existem exatamente 21 políticas em public');
+SELECT is((SELECT count(*)::int FROM pg_policies WHERE schemaname = 'public'), 16, 'existem exatamente 16 políticas em public');
 SELECT set_eq(
   $$SELECT tablename::text, policyname::text, cmd::text FROM pg_policies WHERE schemaname = 'public'$$,
   $$VALUES
     ('profiles', 'profiles_select', 'SELECT'), ('profiles', 'profiles_update_own', 'UPDATE'),
-    ('organizations', 'organizations_select', 'SELECT'), ('organizations', 'organizations_insert', 'INSERT'),
-    ('organizations', 'organizations_update', 'UPDATE'), ('organizations', 'organizations_delete', 'DELETE'),
-    ('organization_members', 'organization_members_select', 'SELECT'), ('organization_members', 'organization_members_insert', 'INSERT'),
-    ('organization_members', 'organization_members_update', 'UPDATE'), ('organization_members', 'organization_members_delete', 'DELETE'),
+    ('organizations', 'organizations_select', 'SELECT'), ('organizations', 'organizations_update', 'UPDATE'),
+    ('organization_members', 'organization_members_select', 'SELECT'),
     ('whatsapp_accounts', 'whatsapp_accounts_select', 'SELECT'),
     ('contacts', 'contacts_select', 'SELECT'), ('conversations', 'conversations_select', 'SELECT'),
     ('messages', 'messages_select', 'SELECT'),
@@ -95,7 +93,7 @@ SELECT set_eq(
     ('automation_sessions', 'automation_sessions_select', 'SELECT'),
     ('automation_executions', 'automation_executions_select', 'SELECT'),
     ('automation_media', 'automation_media_select', 'SELECT')$$,
-  'as 21 políticas da auditoria, com o comando correto'
+  'as 16 políticas (sem escrita direta em vínculos nem criação/exclusão de organização, G2A), com o comando correto'
 );
 SELECT ok(
   (SELECT bool_and(roles = ARRAY['antero_app']::name[] AND permissive = 'PERMISSIVE') FROM pg_policies WHERE schemaname = 'public'),
@@ -111,8 +109,8 @@ SELECT set_eq(
   $$SELECT table_name::text, privilege_type::text FROM information_schema.role_table_grants
     WHERE grantee = 'antero_app' AND table_schema = 'public'$$,
   $$VALUES ('profiles', 'SELECT'),
-           ('organizations', 'SELECT'), ('organizations', 'INSERT'), ('organizations', 'DELETE'),
-           ('organization_members', 'SELECT'), ('organization_members', 'INSERT'), ('organization_members', 'UPDATE'), ('organization_members', 'DELETE'),
+           ('organizations', 'SELECT'),
+           ('organization_members', 'SELECT'),
            ('whatsapp_accounts', 'SELECT'),
            ('contacts', 'SELECT'), ('conversations', 'SELECT'), ('messages', 'SELECT'),
            ('organization_modules', 'SELECT'), ('conversation_events', 'SELECT'),
@@ -212,10 +210,12 @@ SELECT throws_ok(
   $$SELECT pg_temp.does('a_owner', $q$INSERT INTO public.organizations (name, slug) VALUES ('Nova', 'nova-por-owner')$q$)$$,
   '42501', NULL, 'organizations_insert: owner de organização NÃO cria organização'
 );
-SELECT is(
-  pg_temp.does('platform', $q$INSERT INTO public.organizations (name, slug) VALUES ('Org C', 'org-c-030')$q$),
-  1::bigint, 'organizations_insert: admin da plataforma cria organização'
+SELECT throws_ok(
+  $$SELECT pg_temp.does('platform', $q$INSERT INTO public.organizations (name, slug) VALUES ('Org C', 'org-c-030')$q$)$$,
+  '42501', NULL, 'organizations: admin da plataforma NÃO cria organização por INSERT direto (G2A)'
 );
+-- Org C para os testes de UPDATE e DELETE: criada como operação administrativa (fora de antero_app).
+INSERT INTO public.organizations (name, slug) VALUES ('Org C', 'org-c-030');
 INSERT INTO ids SELECT 'org_c', id FROM public.organizations WHERE slug = 'org-c-030';
 
 SELECT is(pg_temp.does('a_admin', $q$UPDATE public.organizations SET name = 'Org A (admin)' WHERE id = {org_a}$q$), 1::bigint, 'organizations_update: admin ativo altera a própria organização');
@@ -225,9 +225,9 @@ SELECT is(pg_temp.does('a_disabled', $q$UPDATE public.organizations SET name = '
 SELECT is(pg_temp.does('a_admin', $q$UPDATE public.organizations SET name = 'Hack' WHERE id = {org_b}$q$), 0::bigint, 'organizations_update: admin de A NÃO altera B');
 SELECT is(pg_temp.does('platform', $q$UPDATE public.organizations SET name = 'Org C (plataforma)' WHERE id = {org_c}$q$), 1::bigint, 'organizations_update: admin da plataforma altera o nome de qualquer organização');
 
-SELECT is(pg_temp.does('a_owner', 'DELETE FROM public.organizations WHERE id = {org_a}'), 0::bigint, 'organizations_delete: owner NÃO apaga a organização');
-SELECT is(pg_temp.does('b_owner', 'DELETE FROM public.organizations WHERE id = {org_a}'), 0::bigint, 'organizations_delete: dono de outra organização NÃO apaga');
-SELECT is(pg_temp.does('platform', 'DELETE FROM public.organizations WHERE id = {org_c}'), 1::bigint, 'organizations_delete: admin da plataforma apaga');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', 'DELETE FROM public.organizations WHERE id = {org_a}')$$, '42501', NULL, 'organizations: owner NÃO apaga a organização');
+SELECT throws_ok($$SELECT pg_temp.does('b_owner', 'DELETE FROM public.organizations WHERE id = {org_a}')$$, '42501', NULL, 'organizations: dono de outra organização NÃO apaga');
+SELECT throws_ok($$SELECT pg_temp.does('platform', 'DELETE FROM public.organizations WHERE id = {org_c}')$$, '42501', NULL, 'organizations: admin da plataforma NÃO apaga por DELETE direto (G2A)');
 SELECT throws_ok(
   $$SELECT pg_temp.does('platform', 'TRUNCATE public.organizations')$$,
   '42501', NULL, 'TRUNCATE é negado mesmo ao admin da plataforma'
@@ -242,38 +242,40 @@ SELECT is(pg_temp.sees('a_disabled', 'SELECT 1 FROM public.organization_members'
 SELECT is(pg_temp.sees('nobody', 'SELECT 1 FROM public.organization_members'), 0::bigint, 'organization_members_select: sem organização não vê vínculos');
 SELECT is(pg_temp.sees('platform', 'SELECT 1 FROM public.organization_members WHERE organization_id IN ({org_a}, {org_b})'), 6::bigint, 'organization_members_select: admin da plataforma vê todos');
 
-SELECT is(
-  pg_temp.does('a_admin', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_a}, {a_recruit}, 'attendant')$q$),
-  1::bigint, 'organization_members_insert: admin adiciona membro à própria organização'
+-- Escrita direta em vínculos: nenhum papel da aplicação (G2A). Cada caso é
+-- recusado pelo PRIVILÉGIO (42501), antes da RLS; a gestão será por função.
+SELECT throws_ok(
+  $$SELECT pg_temp.does('a_admin', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_a}, {a_recruit}, 'attendant')$q$)$$,
+  '42501', NULL, 'organization_members: admin NÃO adiciona membro por INSERT direto'
 );
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_att', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_a}, {platform}, 'attendant')$q$)$$,
-  '42501', NULL, 'organization_members_insert: atendente NÃO adiciona membros'
+  '42501', NULL, 'organization_members: atendente NÃO adiciona membros'
 );
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_admin', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_b}, {a_admin}, 'owner')$q$)$$,
-  '42501', NULL, 'organization_members_insert: admin de A NÃO se insere em B'
+  '42501', NULL, 'organization_members: admin de A NÃO se insere em B'
 );
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_disabled', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_a}, {platform}, 'admin')$q$)$$,
-  '42501', NULL, 'organization_members_insert: admin desativado NÃO adiciona membros'
+  '42501', NULL, 'organization_members: admin desativado NÃO adiciona membros'
 );
-SELECT is(
-  pg_temp.does('platform', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_b}, {b_recruit}, 'attendant')$q$),
-  1::bigint, 'organization_members_insert: admin da plataforma adiciona membro em qualquer organização'
+SELECT throws_ok(
+  $$SELECT pg_temp.does('platform', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_b}, {b_recruit}, 'attendant')$q$)$$,
+  '42501', NULL, 'organization_members: admin da plataforma NÃO cria vínculo por INSERT direto'
 );
 
-SELECT is(pg_temp.does('a_admin', $q$UPDATE public.organization_members SET role = 'admin' WHERE id = {m_a_invited}$q$), 1::bigint, 'organization_members_update: admin altera papel de membro da própria organização');
-SELECT is(pg_temp.does('a_att', $q$UPDATE public.organization_members SET role = 'owner' WHERE user_id = {a_owner}$q$), 0::bigint, 'organization_members_update: quem não é admin não altera vínculos');
-SELECT is(pg_temp.does('b_owner', $q$UPDATE public.organization_members SET status = 'disabled' WHERE organization_id = {org_a}$q$), 0::bigint, 'organization_members_update: dono de B NÃO altera vínculos de A');
+SELECT throws_ok($$SELECT pg_temp.does('a_admin', $q$UPDATE public.organization_members SET role = 'admin' WHERE id = {m_a_invited}$q$)$$, '42501', NULL, 'organization_members: admin NÃO altera papel por UPDATE direto');
+SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.organization_members SET role = 'owner' WHERE user_id = {a_owner}$q$)$$, '42501', NULL, 'organization_members: atendente NÃO altera vínculos');
+SELECT throws_ok($$SELECT pg_temp.does('b_owner', $q$UPDATE public.organization_members SET status = 'disabled' WHERE organization_id = {org_a}$q$)$$, '42501', NULL, 'organization_members: dono de B NÃO altera vínculos de A');
 SELECT throws_ok(
   $$SELECT pg_temp.does('a_admin', 'UPDATE public.organization_members SET organization_id = {org_b} WHERE id = {m_a_att}')$$,
-  '42501', NULL, 'organization_members_update: admin NÃO move membro para outra organização (WITH CHECK)'
+  '42501', NULL, 'organization_members: admin NÃO move membro para outra organização'
 );
 
-SELECT is(pg_temp.does('a_att', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}'), 0::bigint, 'organization_members_delete: não-admin NÃO remove membros');
-SELECT is(pg_temp.does('b_owner', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}'), 0::bigint, 'organization_members_delete: dono de B NÃO remove membro de A');
-SELECT is(pg_temp.does('a_admin', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}'), 1::bigint, 'organization_members_delete: admin remove membro da própria organização');
+SELECT throws_ok($$SELECT pg_temp.does('a_att', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}')$$, '42501', NULL, 'organization_members: não-admin NÃO remove membros');
+SELECT throws_ok($$SELECT pg_temp.does('b_owner', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}')$$, '42501', NULL, 'organization_members: dono de B NÃO remove membro de A');
+SELECT throws_ok($$SELECT pg_temp.does('a_admin', 'DELETE FROM public.organization_members WHERE id = {m_a_invited}')$$, '42501', NULL, 'organization_members: admin NÃO remove membro por DELETE direto');
 
 -- ---------------------------------------------------------------------------
 -- whatsapp_accounts_select / insert / update / delete

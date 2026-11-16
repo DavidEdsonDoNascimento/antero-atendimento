@@ -63,14 +63,25 @@ test("usuário de B não vê A, nem buscando pelo id exato", async () => {
   assert.equal(result.byIdRows, 0);
 });
 
-test("usuário de A não altera nem apaga dados de B (0 linhas, sem erro que vaze existência)", async () => {
-  const result = await withUserTransaction(f!.users.aOwner, async (tx) => ({
-    update: (await tx.query("UPDATE public.organizations SET name = 'invasão' WHERE id = $1", [f!.orgB])).rowCount,
-    remove: (await tx.query("DELETE FROM public.organization_members WHERE organization_id = $1", [f!.orgB])).rowCount,
-  }));
-  assert.deepEqual(result, { update: 0, remove: 0 });
+test("usuário de A não altera nem apaga dados de B (0 linhas ou recusa igual para qualquer alvo, sem vazar existência)", async () => {
+  const update = await withUserTransaction(f!.users.aOwner, async (tx) =>
+    (await tx.query("UPDATE public.organizations SET name = 'invasão' WHERE id = $1", [f!.orgB])).rowCount,
+  );
+  assert.equal(update, 0);
+  // Vínculos não têm escrita direta (G2A): a recusa é a mesma para B, para a
+  // própria A e para uma organização inexistente, então não revela nada.
+  for (const organizationId of [f!.orgB, f!.orgA, randomUUID()]) {
+    await assert.rejects(
+      withUserTransaction(f!.users.aOwner, (tx) =>
+        tx.query("DELETE FROM public.organization_members WHERE organization_id = $1", [organizationId]),
+      ),
+      { code: "42501" },
+    );
+  }
   const name = (await fixture.query("SELECT name FROM public.organizations WHERE id = $1", [f!.orgB])).rows[0].name;
   assert.equal(name, "Org B Integração");
+  const members = await fixture.query("SELECT count(*)::int AS n FROM public.organization_members WHERE organization_id IN ($1, $2)", [f!.orgA, f!.orgB]);
+  assert.ok(members.rows[0].n > 0, "nenhum vínculo removido");
 });
 
 test("usuário de A não forja dados com o organization_id de B", async () => {

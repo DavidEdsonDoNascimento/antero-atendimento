@@ -133,8 +133,8 @@ SELECT throws_ok($$SELECT pg_temp.does('a_admin', $q$UPDATE public.organizations
 SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.organizations SET status = 'active' WHERE id = {org_a}$q$)$$, '42501', NULL, 'suspensa: atendente NÃO reativa');
 SELECT is((SELECT status::text FROM public.organizations WHERE id = pg_temp.id('org_a')), 'inactive', 'suspensa: status permanece inactive');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$INSERT INTO public.organization_members (organization_id, user_id, role) VALUES ({org_a}, {recruit}, 'owner')$q$)$$, '42501', NULL, 'suspensa: owner NÃO adiciona membro');
-SELECT is(pg_temp.does('a_owner', $q$UPDATE public.organization_members SET role = 'attendant' WHERE user_id = {a_att}$q$), 0::bigint, 'suspensa: owner NÃO altera vínculo');
-SELECT is(pg_temp.does('a_owner', 'DELETE FROM public.organization_members WHERE user_id = {a_att}'), 0::bigint, 'suspensa: owner NÃO remove vínculo');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.organization_members SET role = 'attendant' WHERE user_id = {a_att}$q$)$$, '42501', NULL, 'suspensa: owner NÃO altera vínculo (sem escrita direta desde a G2A)');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', 'DELETE FROM public.organization_members WHERE user_id = {a_att}')$$, '42501', NULL, 'suspensa: owner NÃO remove vínculo (sem escrita direta desde a G2A)');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.conversations SET status = 'resolved', resolved_at = now() WHERE id = {cv_a}$q$)$$, '42501', NULL, 'suspensa: owner NÃO altera conversa');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.contacts SET name = 'Hack' WHERE id = {ct_a}$q$)$$, '42501', NULL, 'suspensa: owner NÃO altera contato');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', 'DELETE FROM public.messages')$$, '42501', NULL, 'suspensa: owner NÃO apaga mensagem');
