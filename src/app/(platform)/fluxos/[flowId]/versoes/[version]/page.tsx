@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
+import { requireModule } from "@/lib/auth/dal";
 import { toEditorDefinition } from "@/modules/automations/editor";
 import { getFlowForEditor, getFlowVersion } from "@/modules/automations/sql-queries";
 
@@ -12,13 +13,13 @@ import { AdminOnly } from "../../../_components/admin-only";
 import { FlowOutline } from "../../../_components/flow-outline";
 import { RestoreForm } from "../../../_components/restore-form";
 import { formatDateTime } from "../../../_lib/format";
-import { requireFlowEditor } from "../../../_lib/load";
+import { flowEditorContext } from "../../../_lib/load";
 
 export const metadata: Metadata = { title: "Versão da automação" };
 
 export default async function VersaoPage({ params }: { params: Promise<{ flowId: string; version: string }> }) {
   const raw = await params;
-  const { context, flowId, canEdit } = await requireFlowEditor(raw.flowId);
+  const { context, flowId, canEdit } = flowEditorContext(await requireModule("automacoes"), raw.flowId);
   if (!canEdit) return <AdminOnly />;
   const number = Number(raw.version);
   if (!Number.isInteger(number) || number < 1) notFound();

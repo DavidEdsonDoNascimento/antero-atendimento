@@ -7,17 +7,18 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
+import { requireModule } from "@/lib/auth/dal";
 import { getFlowForEditor, listFlowVersions } from "@/modules/automations/sql-queries";
 
 import { AdminOnly } from "../../_components/admin-only";
 import { RestoreForm } from "../../_components/restore-form";
 import { formatDateTime } from "../../_lib/format";
-import { requireFlowEditor } from "../../_lib/load";
+import { flowEditorContext } from "../../_lib/load";
 
 export const metadata: Metadata = { title: "Versões da automação" };
 
 export default async function VersoesPage({ params }: { params: Promise<{ flowId: string }> }) {
-  const { context, flowId, canEdit } = await requireFlowEditor((await params).flowId);
+  const { context, flowId, canEdit } = flowEditorContext(await requireModule("automacoes"), (await params).flowId);
   if (!canEdit) return <AdminOnly />;
   const [flow, versions] = await Promise.all([getFlowForEditor(context, flowId), listFlowVersions(context, flowId)]);
   if (!flow) notFound();

@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
 import { Card } from "@/components/ui/card";
+import { requireModule } from "@/lib/auth/dal";
 import { toEditorDefinition } from "@/modules/automations/editor";
 import { getFlowForEditor, listFlowImages } from "@/modules/automations/sql-queries";
 
 import { AdminOnly } from "../_components/admin-only";
 import { FlowEditor } from "../_components/flow-editor";
-import { requireFlowEditor } from "../_lib/load";
+import { flowEditorContext } from "../_lib/load";
 
 export const metadata: Metadata = { title: "Editar automação" };
 
@@ -18,7 +19,7 @@ export default async function EditarAutomacaoPage({
   params: Promise<{ flowId: string }>;
   searchParams: Promise<{ restaurada?: string }>;
 }) {
-  const { active, context, flowId, canEdit } = await requireFlowEditor((await params).flowId);
+  const { active, context, flowId, canEdit } = flowEditorContext(await requireModule("automacoes"), (await params).flowId);
   if (!canEdit) return <AdminOnly />;
   const [flow, images] = await Promise.all([getFlowForEditor(context, flowId), listFlowImages(context)]);
   if (!flow) notFound();
