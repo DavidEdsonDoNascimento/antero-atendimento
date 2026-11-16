@@ -114,8 +114,15 @@ revogado criaria um ciclo `/login ↔ /visao-geral`.
 empresa. Toda consulta usa `withOrganizationTransaction` (vínculo ativo
 conferido na mesma transação + RLS + filtro explícito). `/admin` exige
 `profiles.is_platform_admin` no DAL e de novo no banco
-(`listAllOrganizations`). O status da organização (`inactive`) não bloqueia
-o acesso, como antes.
+(`listAllOrganizations`). Organização suspensa (`inactive`, 0006) bloqueia o
+acesso: `is_org_member`/`is_org_admin` exigem organização `active` e a
+organização ativa só considera vínculos em organização `active`. Quem só tem
+vínculo em organização suspensa vai para `/organizacao-suspensa` (dados
+preservados); reativar restaura o acesso. O administrador da plataforma
+continua chegando ao `/admin` para reativar, sem depender de vínculo, e sua
+permissão global cobre dados cadastrais (organizações, membros, módulos, canais),
+não o conteúdo operacional: conversas, contatos e automações exigem vínculo
+ativo.
 
 **Erros:** identidade/banco indisponível → `app/error.tsx` ("Serviço
 temporariamente indisponível", botão que refaz a requisição) ou mensagem do
