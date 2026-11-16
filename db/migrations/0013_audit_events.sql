@@ -33,9 +33,13 @@
 -- ---------------------------------------------------------------------------
 create table public.audit_events (
   id bigint generated always as identity primary key,
-  -- Início da transação (o mesmo instante de updated_at). Nem id nem
-  -- occurred_at representam a ordem de COMMIT: ordene por (occurred_at, id).
-  occurred_at timestamptz not null default now(),
+  -- Instante da GRAVAÇÃO (clock_timestamp), não o início da transação: as
+  -- mudanças de uma organização acontecem sob a trava da linha dela, então,
+  -- dentro da mesma organização, (occurred_at, id) segue a ordem real das
+  -- mudanças mesmo quando uma transação começou antes e esperou a trava.
+  -- Entre organizações diferentes, nem id nem occurred_at são a ordem de
+  -- COMMIT; ordene por (occurred_at, id) para resultados determinísticos.
+  occurred_at timestamptz not null default pg_catalog.clock_timestamp(),
   organization_id uuid not null,
   actor_user_id uuid,
   actor_kind text not null,
