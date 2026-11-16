@@ -92,8 +92,9 @@ after(async () => {
 });
 
 test("configuração: valida a definição antes de gravar; papel e módulo conferidos", async () => {
+  // Rascunho incompleto é gravado (E3B, tests/db/automation-editor.test.ts); o que não é definição v1, não.
   await assert.rejects(
-    saveFlowDraft(owner(), { slug: "quebrado", name: "Quebrado", definition: { schemaVersion: 1, entryStepId: "x", steps: [] }, isEntry: false }),
+    saveFlowDraft(owner(), { slug: "quebrado", name: "Quebrado", definition: { schemaVersion: 2, entryStepId: "x", steps: [] }, isEntry: false }),
     (error: unknown) => error instanceof FlowCommandError && error.code === "invalid_definition" && error.issues.length > 0,
   );
   await assert.rejects(
