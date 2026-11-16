@@ -32,6 +32,15 @@ test("o catálogo tem os quatro módulos, cada um com nome e descrição", () =>
   }
 });
 
+test("estado dos módulos: Automações tem editor mas avisa que o WhatsApp real depende de integrações; os demais seguem em desenvolvimento", () => {
+  assert.equal(MODULE_CATALOG.atendimento.implemented, true);
+  assert.equal(MODULE_CATALOG.automacoes.implemented, true);
+  assert.match(MODULE_CATALOG.automacoes.limitation ?? "", /editor está disponível/);
+  assert.match(MODULE_CATALOG.automacoes.limitation ?? "", /WhatsApp/);
+  assert.equal(MODULE_CATALOG.atendimento.limitation, undefined);
+  for (const name of ["campanhas", "contatos"] as const) assert.equal(MODULE_CATALOG[name].implemented, false);
+});
+
 test("isOrganizationModule aceita só valores do catálogo", () => {
   assert.equal(isOrganizationModule("contatos"), true);
   for (const value of ["financeiro", "", null, undefined, ["contatos"], "ATENDIMENTO"]) {

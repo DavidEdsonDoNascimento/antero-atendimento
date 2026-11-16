@@ -167,6 +167,9 @@ test("owner cria, monta, salva, testa, publica, altera, publica de novo e restau
   const list = await owner.page("/fluxos");
   assert.equal(list.status, 200);
   assert.match(list.html, /Nenhuma automação ainda/);
+  // Estado do módulo: editor disponível, WhatsApp real ainda depende de integrações.
+  assert.match(list.html, /O editor está disponível/);
+  assert.match(list.html, /depende de integrações em desenvolvimento/);
   const createPage = await owner.page("/fluxos/novo");
   const createId = actionIdIn(createPage.html, 'name="name"');
   const created = await owner.action("/fluxos/novo", createId, { name: "Atendimento do Sítio (fictício)", isEntry: "on" });
