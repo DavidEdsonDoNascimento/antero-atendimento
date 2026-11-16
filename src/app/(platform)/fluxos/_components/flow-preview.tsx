@@ -107,7 +107,7 @@ export function FlowPreview({
   const answers = conversation.state?.answers ?? [];
 
   return (
-    <section aria-label="Prévia da conversa" className="flex flex-col rounded-lg border border-line bg-surface">
+    <section aria-label="Prévia da conversa" className="flex h-full min-h-0 flex-col rounded-lg border border-line bg-surface shadow-2xl shadow-black/60">
       <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3">
         <div>
           <p className="text-sm font-semibold text-foreground">Testar conversa</p>
@@ -137,7 +137,7 @@ export function FlowPreview({
         </p>
       )}
 
-      <div className="flex min-h-72 flex-1 flex-col gap-2 overflow-y-auto p-4" aria-live="polite">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-4" aria-live="polite">
         {blocked && session === null ? (
           <div className="space-y-2 text-sm text-muted">
             <p>Corrija os problemas do fluxo para testar a conversa:</p>

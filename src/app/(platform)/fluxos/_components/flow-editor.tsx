@@ -177,7 +177,7 @@ export function FlowEditor({
         <Link href="/fluxos" className="text-xs text-muted hover:text-foreground">
           ← Automações
         </Link>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 flex-1 space-y-2">
             <label htmlFor="flow-name" className="sr-only">
               Nome da automação
@@ -248,9 +248,10 @@ export function FlowEditor({
               </Button>
             </div>
           )}
-          {saveState.status === "saved" && !dirty && <p role="status" className="text-sm text-emerald-300">{saveState.message}</p>}
+          {/* Cada confirmação some quando deixa de ser verdade (salvo → publicado → alterado de novo). */}
+          {saveState.status === "saved" && !dirty && unpublished && <p role="status" className="text-sm text-emerald-300">{saveState.message}</p>}
           {saveState.status === "error" && <p role="alert" className="text-sm text-red-300">{saveState.message}</p>}
-          {publishState.status === "published" && !dirty && <p role="status" className="text-sm text-emerald-300">{publishState.message}</p>}
+          {publishState.status === "published" && !dirty && !unpublished && <p role="status" className="text-sm text-emerald-300">{publishState.message}</p>}
           {publishState.status === "error" && <p role="alert" className="text-sm text-red-300">{publishState.message}</p>}
           {!canPublish && !conflict && (
             <p className="text-xs text-muted-2">
@@ -266,7 +267,7 @@ export function FlowEditor({
         </div>
       </div>
 
-      <div className={cn("grid gap-4", previewOpen ? "lg:grid-cols-[16rem_minmax(0,1fr)_22rem]" : "lg:grid-cols-[16rem_minmax(0,1fr)]")}>
+      <div className="grid gap-4 lg:grid-cols-[16rem_minmax(0,1fr)]">
         {/* Etapas */}
         <nav aria-label="Etapas do fluxo" className="space-y-2">
           <button
@@ -379,8 +380,9 @@ export function FlowEditor({
           )}
         </section>
 
+        {/* Painel ao lado, por cima da página: o formulário continua editável e a prévia acompanha. */}
         {previewOpen && (
-          <div className="lg:sticky lg:top-4 lg:self-start">
+          <div className="fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col p-3 sm:left-auto sm:w-[24rem]">
             <FlowPreview definition={definition} humanHandoffAvailable={humanHandoffAvailable} onClose={() => setPreviewOpen(false)} />
           </div>
         )}
@@ -440,7 +442,9 @@ export function FlowEditor({
           </p>
           {isEntry && flow.status !== "paused" && <p>Esta automação responde às conversas novas da sua organização.</p>}
           {flow.status === "paused" && <p>A automação está pausada: a versão fica pronta, mas só responde depois de reativada.</p>}
-          {issues.length > 0 && <p className="text-amber-200">Há {issues.length} aviso(s) que não impedem a publicação.</p>}
+          {issues.length > errors.length && (
+            <p className="text-amber-200">Há {issues.length - errors.length} aviso(s) que não impedem a publicação.</p>
+          )}
         </div>
         <form
           action={publishAction}
