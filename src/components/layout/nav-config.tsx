@@ -26,7 +26,7 @@ export const mainNav: NavItem[] = [
   { href: "/visao-geral", label: "Visão geral", icon: IconOverview },
   { href: "/conversas", label: "Conversas", icon: IconConversations, module: "atendimento" },
   { href: "/contatos", label: "Contatos", icon: IconContacts, soon: "Em breve", module: "contatos" },
-  { href: "/fluxos", label: "Automações", icon: IconFlows, soon: "Em breve", module: "automacoes" },
+  { href: "/fluxos", label: "Automações", icon: IconFlows, module: "automacoes" },
   { href: "/campanhas", label: "Campanhas", icon: IconCampaigns, soon: "Em breve", module: "campanhas" },
   { href: "/equipe", label: "Equipe", icon: IconTeam },
   { href: "/configuracoes", label: "Configurações", icon: IconSettings },
