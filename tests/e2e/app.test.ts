@@ -886,3 +886,52 @@ test("central: suspender e reativar continuam funcionando pelo detalhe, sem toca
   assert.deepEqual(after.rows, before.rows);
 });
 
+// ---------------------------------------------------------------------------
+// G2B — auditoria administrativa
+// ---------------------------------------------------------------------------
+
+test("auditoria: suspender, reativar e módulos pela central geram os eventos, com o admin como autor; recusas não geram", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const owner = await loggedIn("aOwner");
+  const eventsOf = async (organizationId: string) =>
+    (
+      await fixture.query(
+        "SELECT action, actor_kind, actor_user_id, details FROM public.audit_events WHERE organization_id = $1 AND actor_kind = 'platform_admin' ORDER BY occurred_at, id",
+        [organizationId],
+      )
+    ).rows;
+  const before = (await eventsOf(f!.orgC)).length;
+
+  const detail = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
+  const statusId = statusActionIdOf(detail.html)!;
+  const moduleId = moduleActionIdOf(detail.html)!;
+  try {
+    // Recusas primeiro: nada muda e nenhum evento.
+    await postStatusAction(owner, statusId, f!.orgC, "inactive");
+    await postModuleAction(owner, moduleId, { organizationId: f!.orgC, module: "contatos", enabled: "true" });
+    assert.equal((await eventsOf(f!.orgC)).length, before);
+
+    assert.match((await postStatusAction(platformAdmin, statusId, f!.orgC, "inactive")).text, /Organização suspensa\./);
+    assert.match((await postStatusAction(platformAdmin, statusId, f!.orgC, "inactive")).text, /Organização suspensa\./);
+    assert.match((await postStatusAction(platformAdmin, statusId, f!.orgC, "active")).text, /Organização reativada\./);
+    assert.match((await postModuleAction(platformAdmin, moduleId, { organizationId: f!.orgC, module: "contatos", enabled: "true" })).text, /Contatos habilitado/);
+    assert.match((await postModuleAction(platformAdmin, moduleId, { organizationId: f!.orgC, module: "contatos", enabled: "false" })).text, /Contatos desabilitado/);
+
+    const events = (await eventsOf(f!.orgC)).slice(before);
+    assert.deepEqual(
+      events.map((event) => [event.action, event.actor_user_id, event.details]),
+      [
+        ["organization.suspended", f!.more.platformAdmin, { from: "active", to: "inactive" }],
+        ["organization.reactivated", f!.more.platformAdmin, { from: "inactive", to: "active" }],
+        ["module.enabled", f!.more.platformAdmin, { module: "contatos", from: false, to: true }],
+        ["module.disabled", f!.more.platformAdmin, { module: "contatos", from: true, to: false }],
+      ],
+      "um evento por alteração efetiva; a suspensão repetida não gera evento",
+    );
+    // A central continua igual para quem administra; quem não é admin não lê eventos (a tela não existe ainda).
+    assert.equal((await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`)).status, 200);
+  } finally {
+    await setStatus(f!.orgC, "active");
+    await setModules(f!.orgC, ["atendimento"]);
+  }
+});
