@@ -9,7 +9,7 @@ identificador de cliente: toda diferença entre organizações é uma linha em
 | Identificador | Nome | Finalidade | Rotas | Situação |
 | --- | --- | --- | --- | --- |
 | `atendimento` | Atendimento | Inbox e atendimento humano | `/conversas` | disponível (assumir, responder, resolver — `docs/ATENDIMENTO.md`) |
-| `automacoes` | Automações | Fluxos, menus e respostas automáticas | `/fluxos` | motor disponível no simulador; editor na E3B (`docs/AUTOMACOES.md`) |
+| `automacoes` | Automações | Fluxos, menus e respostas automáticas | `/fluxos` | motor (simulador) e editor self-service em `/fluxos` (`docs/AUTOMACOES.md`) |
 | `campanhas` | Campanhas | Criação e envio de campanhas | `/campanhas` | em desenvolvimento |
 | `contatos` | Contatos | Gestão, importação e listas comerciais | `/contatos` | em desenvolvimento |
 
