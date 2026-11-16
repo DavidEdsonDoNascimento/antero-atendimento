@@ -27,7 +27,7 @@ módulos em desenvolvimento só informam isso.
 - **Organização nova:** nasce sem nenhum módulo. Sem linha significa desabilitado.
 - **Organizações anteriores à migration `0007`:** receberam Atendimento, porque já
   usavam a Inbox. Nada mais foi habilitado.
-- **Configuração:** `/admin` → "Configurar módulos" → Habilitar ou Desabilitar.
+- **Configuração:** `/admin` → "Abrir detalhes" da organização → "Módulos contratados" → Habilitar ou Desabilitar (`docs/ADMIN-PLATAFORMA.md`).
   Cada alteração muda um único módulo e registra responsável e horário.
 
 Só `is_platform_admin` altera. Owner, admin e atendente não têm caminho nenhum: o

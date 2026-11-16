@@ -64,8 +64,9 @@ Marcado como “Em breve” na interface (não são botões falsos):
   (`docs/ATENDIMENTO.md`).
 - **Automações** — lista, editor, prévia, publicação e histórico de versões
   (`docs/AUTOMACOES.md`); só owner/admin editam.
-- **Admin da plataforma** — lista de organizações, com suspensão, reativação e
-  configuração de módulos (apenas `is_platform_admin`). Ver `docs/MODULES.md`.
+- **Admin da plataforma** — central de organizações: lista com busca e filtro por situação,
+  detalhes (dados, módulos, equipe, canal), suspensão e reativação (apenas `is_platform_admin`).
+  Só administração, sem acesso aos dados operacionais. Ver `docs/ADMIN-PLATAFORMA.md` e `docs/MODULES.md`.
 
 ## Fora do escopo do MVP
 
