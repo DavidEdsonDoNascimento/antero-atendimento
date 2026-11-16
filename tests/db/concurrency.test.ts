@@ -139,10 +139,11 @@ test("depois da carga, nenhuma conexão do pool guarda contexto", async () => {
 test("uma falha no meio de transações concorrentes não afeta as outras", async () => {
   const ok = withUserTransaction(f!.users.aOwner, async (tx) => {
     await tx.query("SELECT pg_sleep(0.05)");
-    return (await tx.query("UPDATE public.organizations SET name = 'concorrente ok' WHERE id = $1", [f!.orgA])).rowCount;
+    // Escrita direta que a aplicação ainda tem (desde a G2A): o nome do próprio perfil.
+    return (await tx.query("UPDATE public.profiles SET full_name = 'concorrente ok' WHERE id = $1", [f!.users.aOwner])).rowCount;
   });
   const failing = withUserTransaction(f!.users.bOwner, async (tx) => {
-    await tx.query("UPDATE public.organizations SET name = 'deveria ser desfeito' WHERE id = $1", [f!.orgB]);
+    await tx.query("UPDATE public.profiles SET full_name = 'deveria ser desfeito' WHERE id = $1", [f!.users.bOwner]);
     await tx.query("SELECT 1/0");
   });
   const [okResult, failResult] = await Promise.allSettled([ok, failing]);
@@ -150,8 +151,8 @@ test("uma falha no meio de transações concorrentes não afeta as outras", asyn
   assert.equal(failResult.status, "rejected");
   assert.equal((failResult as PromiseRejectedResult).reason.code, "22012");
   const names = (
-    await fixture.query("SELECT id, name FROM public.organizations WHERE id = ANY($1::uuid[])", [[f!.orgA, f!.orgB]])
+    await fixture.query("SELECT id, full_name FROM public.profiles WHERE id = ANY($1::uuid[])", [[f!.users.aOwner, f!.users.bOwner]])
   ).rows;
-  assert.equal(names.find((r) => r.id === f!.orgA).name, "concorrente ok");
-  assert.equal(names.find((r) => r.id === f!.orgB).name, "Org B Integração");
+  assert.equal(names.find((r) => r.id === f!.users.aOwner).full_name, "concorrente ok");
+  assert.equal(names.find((r) => r.id === f!.users.bOwner).full_name, "B Owner");
 });

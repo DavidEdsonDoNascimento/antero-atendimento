@@ -23,7 +23,7 @@ SELECT set_eq(
   'SELECT signature FROM our_functions WHERE prosecdef',
   ARRAY[
     'is_platform_admin()', 'is_org_member(uuid)', 'is_org_admin(uuid)', 'shares_org_with(uuid)',
-    'handle_new_user()', 'handle_user_email_updated()',
+    'handle_new_user()', 'handle_user_email_updated()', 'ensure_active_owner()',
     'ingest_inbound_message(uuid,text,text,text,text)',
     'current_user_suspended_organizations()', 'set_organization_status(uuid,organization_status)',
     'set_organization_module(uuid,organization_module,boolean)',

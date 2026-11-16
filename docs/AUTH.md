@@ -248,8 +248,9 @@ originais estão no Git: `git show 796c6e7:supabase/migrations/…`.
 1. **Supabase remoto (produção atual):** o projeto remoto não foi tocado e
    continua com a falha de autopromoção a `is_platform_admin` (ver
    `docs/DATABASE.md`); decidir seu destino (migração de dados, desligamento).
-2. **Regras de membros herdadas:** `admin` pode criar/alterar/remover `owner`
-   (ver `docs/DATABASE.md`); decidir a política antes de gerir membros.
+2. **Regras de membros:** a escrita direta de vínculos foi removida e há
+   garantia de owner ativo (G2A, 0012, `docs/DATABASE.md`). Falta decidir as regras
+   de papéis (quem gerencia quem) antes de qualquer gestão de equipe pela aplicação.
 3. **Bloqueio por conta:** o limite é por IP; avaliar bloqueio progressivo
    por conta (ou atraso) antes da exposição pública. Análise e recomendação em
    `docs/DEPLOY.md` ("Rate limiting"): decidir antes de abrir a usuários reais.

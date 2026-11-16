@@ -58,7 +58,7 @@ SELECT ok(has_function_privilege('antero_app', 'public.set_organization_status(u
 
 -- Privilégios efetivos de antero_app, sem BYPASSRLS.
 SELECT ok(NOT (SELECT rolbypassrls OR rolsuper FROM pg_roles WHERE rolname = 'antero_app'), 'antero_app sem BYPASSRLS e sem superusuário');
-SELECT ok(has_column_privilege('antero_app', 'public.organizations', 'name', 'UPDATE'), 'antero_app: UPDATE em organizations.name');
+SELECT ok(NOT has_column_privilege('antero_app', 'public.organizations', 'name', 'UPDATE'), 'antero_app: sem UPDATE em organizations.name (G2A)');
 SELECT ok(
   NOT (has_column_privilege('antero_app', 'public.organizations', 'status', 'UPDATE')
     OR has_column_privilege('antero_app', 'public.organizations', 'slug', 'UPDATE')
