@@ -272,8 +272,18 @@ test("owner cria, monta, salva, testa, publica, altera, publica de novo e restau
   const statusId = actionIdIn((await owner.page("/fluxos")).html, 'value="paused"');
   assert.match((await owner.action("/fluxos", statusId, { flowId: flow.id, status: "paused" })).text, /Automação pausada/);
   assert.equal((await flowRow(flow.id)).status, "paused");
+  // Pausada: o editor avisa que a prévia continua valendo e o indicador de entrada não promete resposta.
+  const paused = (await owner.page(editorPath)).html;
+  assert.match(paused, /Automação pausada: as conversas novas não recebem respostas automáticas/);
+  assert.match(paused, /a prévia roda só na memória e não\s+envia mensagens reais/);
+  assert.match(paused, /Pausada: não responde às conversas novas/);
+  assert.doesNotMatch(paused, /Responde às conversas novas/);
+  assert.match((await owner.page("/fluxos")).html, /Pausada: não responde às conversas novas/);
   assert.match((await owner.action("/fluxos", statusId, { flowId: flow.id, status: "active" })).text, /Automação reativada/);
   assert.equal((await flowRow(flow.id)).status, "active");
+  const active = (await owner.page(editorPath)).html;
+  assert.doesNotMatch(active, /Automação pausada: as conversas novas/);
+  assert.match(active, /Responde às conversas novas/);
 });
 
 test("sem permissão: atendente, outra organização e organização manipulada não alteram automações nem imagens", async () => {

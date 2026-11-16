@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { automationEndReasonLabel } from "@/lib/labels";
+import type { AutomationFlowStatus } from "@/lib/types/database";
 import { cn } from "@/lib/utils/cn";
 import type { OutboundAction } from "@/modules/automations/actions";
 import { parseFlowDefinition, type FlowDefinition } from "@/modules/automations/definition";
@@ -76,10 +77,12 @@ function SystemNote({ entry }: { entry: Extract<PreviewEntry, { from: "system" }
  */
 export function FlowPreview({
   definition,
+  flowStatus,
   humanHandoffAvailable,
   onClose,
 }: {
   definition: EditorDefinition;
+  flowStatus: AutomationFlowStatus;
   humanHandoffAvailable: boolean;
   onClose: () => void;
 }) {
@@ -123,6 +126,11 @@ export function FlowPreview({
         </div>
       </div>
 
+      {flowStatus === "paused" && (
+        <p className="border-b border-line px-4 py-2 text-xs text-amber-200">
+          Esta automação está pausada, mas pode continuar sendo testada aqui: a prévia roda só na memória do navegador e não envia mensagens reais.
+        </p>
+      )}
       {!humanHandoffAvailable && (
         <p className="border-b border-line px-4 py-2 text-xs text-amber-200">
           Sem o módulo Atendimento: os encaminhamentos mostram a mensagem de indisponibilidade, como na operação real.

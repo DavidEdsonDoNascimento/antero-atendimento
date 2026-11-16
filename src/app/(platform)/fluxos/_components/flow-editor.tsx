@@ -13,6 +13,7 @@ import {
   cleanDefinition,
   describeReference,
   editorIssues,
+  entryIndicator,
   flowOutline,
   hasBlockingIssues,
   insertStep,
@@ -29,13 +30,15 @@ import {
 import {
   publishFlowAction,
   saveDraftAction,
+  setFlowStatusAction,
+  type FlowStatusState,
   type PublishState,
   type SaveDraftState,
 } from "@/modules/automations/editor-actions";
 
 import { Dialog } from "./dialog";
 import { FlowPreview } from "./flow-preview";
-import { FlowStatusForm } from "./flow-status-form";
+import { FlowStatusButton } from "./flow-status-form";
 import type { ImageOption } from "./image-picker";
 import { SettingsForm } from "./settings-form";
 import { StepForm, type StepFormContext } from "./step-form";
@@ -61,6 +64,7 @@ const STEP_HINT: Record<StepType, string> = {
 };
 
 const PUBLISH_INITIAL: PublishState = { status: "idle" };
+const STATUS_INITIAL: FlowStatusState = { status: "idle" };
 
 function snapshotOf(name: string, isEntry: boolean, definition: EditorDefinition): string {
   return JSON.stringify({ name, isEntry, definition: cleanDefinition(definition) });
@@ -97,6 +101,7 @@ export function FlowEditor({
     snapshot: snapshotOf(flow.name, flow.isEntry, initialDefinition),
   } satisfies SaveDraftState);
   const [publishState, publishAction, publishPending] = useActionState(publishFlowAction, PUBLISH_INITIAL);
+  const [statusState, statusAction, statusPending] = useActionState(setFlowStatusAction, STATUS_INITIAL);
 
   const snapshot = snapshotOf(name, isEntry, definition);
   const dirty = snapshot !== saveState.snapshot;
@@ -115,6 +120,7 @@ export function FlowEditor({
   const freshQuestions = new Set(definition.steps.filter((step) => step.type === "question" && !savedQuestions.has(step.id)).map((step) => step.id));
   const canPublish = !dirty && !blocked && !conflict && unpublished && name.trim() !== "";
   const outline = flowOutline(definition);
+  const entry = entryIndicator(flow.status, isEntry);
 
   // Sair com alterações não salvas: aviso do navegador e confirmação nos links da aplicação.
   useEffect(() => {
@@ -171,66 +177,72 @@ export function FlowEditor({
   }
 
   return (
-    <div className="space-y-4">
+    <div className={cn("space-y-4", previewOpen && "min-[1400px]:pr-[25rem]")}>
       {/* Cabeçalho: nome, estado e ações */}
       <div className="space-y-3">
         <Link href="/fluxos" className="text-xs text-muted hover:text-foreground">
           ← Automações
         </Link>
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 flex-1 space-y-2">
-            <label htmlFor="flow-name" className="sr-only">
-              Nome da automação
-            </label>
-            <input
-              id="flow-name"
-              value={name}
-              maxLength={120}
-              onChange={(event) => setName(event.target.value)}
-              className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold tracking-tight text-foreground outline-none hover:border-line focus-visible:border-gold/50"
-            />
-            {name.trim() === "" && <p className="text-xs text-red-300">Dê um nome para a automação.</p>}
-            <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted">
-              <Badge tone={automationFlowStatusTone[flow.status]}>{automationFlowStatusLabel[flow.status]}</Badge>
-              <span>{flow.publishedVersion ? `Versão publicada: ${flow.publishedVersion}` : "Ainda não publicada"}</span>
-              {isEntry && <Badge tone="gold">Responde às conversas novas</Badge>}
-              {dirty ? (
-                <Badge tone="amber">Alterações não salvas</Badge>
-              ) : unpublished ? (
-                <Badge tone="blue">Rascunho salvo, não publicado</Badge>
-              ) : (
-                <Badge tone="zinc">Igual à versão publicada</Badge>
-              )}
-            </div>
+        <div className="min-w-0 space-y-2">
+          <label htmlFor="flow-name" className="sr-only">
+            Nome da automação
+          </label>
+          <input
+            id="flow-name"
+            value={name}
+            maxLength={120}
+            onChange={(event) => setName(event.target.value)}
+            className="w-full rounded-md border border-transparent bg-transparent px-1 py-0.5 text-xl font-semibold tracking-tight text-foreground outline-none hover:border-line focus-visible:border-gold/50"
+          />
+          {name.trim() === "" && <p className="text-xs text-red-300">Dê um nome para a automação.</p>}
+          <div className="flex flex-wrap items-center gap-2 px-1 text-xs text-muted">
+            <Badge tone={automationFlowStatusTone[flow.status]}>{automationFlowStatusLabel[flow.status]}</Badge>
+            <span>{flow.publishedVersion ? `Versão publicada: ${flow.publishedVersion}` : "Ainda não publicada"}</span>
+            {entry && <Badge tone={entry.tone}>{entry.label}</Badge>}
+            {dirty ? (
+              <Badge tone="amber">Alterações não salvas</Badge>
+            ) : unpublished ? (
+              <Badge tone="blue">Rascunho salvo, não publicado</Badge>
+            ) : (
+              <Badge tone="zinc">Igual à versão publicada</Badge>
+            )}
           </div>
-          <div className="flex flex-wrap items-start gap-2">
-            <form action={saveAction}>
-              <input type="hidden" name="flowId" value={flow.id} />
-              <input type="hidden" name="expectedRevision" value={saveState.revision} />
-              <input type="hidden" name="snapshot" value={snapshot} />
-              <button
-                type="submit"
-                disabled={saving || !dirty || conflict || name.trim() === ""}
-                aria-busy={saving}
-                className={buttonVariants({ variant: "secondary" })}
-              >
-                {saving ? "Salvando…" : "Salvar rascunho"}
-              </button>
-            </form>
-            <Button type="button" variant="secondary" onClick={() => setPreviewOpen(!previewOpen)} aria-pressed={previewOpen}>
-              {previewOpen ? "Fechar teste" : "Testar conversa"}
-            </Button>
-            <Button type="button" disabled={!canPublish || publishPending} aria-busy={publishPending} onClick={() => setPublishing(true)}>
-              {publishPending ? "Publicando…" : "Publicar"}
-            </Button>
-            <FlowStatusForm flowId={flow.id} status={flow.status} />
-            <Link href={`/fluxos/${flow.id}/versoes`} className={buttonVariants({ variant: "ghost" })}>
-              Histórico de versões
-            </Link>
-          </div>
+        </div>
+        {/* Ações em linha própria: quebram para a linha de baixo quando faltar espaço, sem competir com o título. */}
+        <div className="flex flex-wrap items-center gap-2">
+          <form action={saveAction}>
+            <input type="hidden" name="flowId" value={flow.id} />
+            <input type="hidden" name="expectedRevision" value={saveState.revision} />
+            <input type="hidden" name="snapshot" value={snapshot} />
+            <button
+              type="submit"
+              disabled={saving || !dirty || conflict || name.trim() === ""}
+              aria-busy={saving}
+              className={buttonVariants({ variant: "secondary" })}
+            >
+              {saving ? "Salvando…" : "Salvar rascunho"}
+            </button>
+          </form>
+          <Button type="button" variant="secondary" onClick={() => setPreviewOpen(!previewOpen)} aria-pressed={previewOpen}>
+            {previewOpen ? "Fechar teste" : "Testar conversa"}
+          </Button>
+          <Button type="button" disabled={!canPublish || publishPending} aria-busy={publishPending} onClick={() => setPublishing(true)}>
+            {publishPending ? "Publicando…" : "Publicar"}
+          </Button>
+          <FlowStatusButton flowId={flow.id} status={flow.status} action={statusAction} pending={statusPending} />
+          <Link href={`/fluxos/${flow.id}/versoes`} className={buttonVariants({ variant: "ghost" })}>
+            Histórico de versões
+          </Link>
         </div>
 
         <div className="space-y-2" aria-live="polite">
+          {flow.status === "paused" && (
+            <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-100">
+              Automação pausada: as conversas novas não recebem respostas automáticas e as que estão em andamento passam
+              para a equipe na próxima mensagem. Você ainda pode usar “Testar conversa”: a prévia roda só na memória e não
+              envia mensagens reais.
+            </p>
+          )}
           {restoredVersion !== null && saveState.status === "idle" && (
             <p className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-sm text-sky-100">
               O conteúdo da versão {restoredVersion} foi carregado como rascunho. Revise, teste e publique para que ele
@@ -252,6 +264,8 @@ export function FlowEditor({
           {saveState.status === "saved" && !dirty && unpublished && <p role="status" className="text-sm text-emerald-300">{saveState.message}</p>}
           {saveState.status === "error" && <p role="alert" className="text-sm text-red-300">{saveState.message}</p>}
           {publishState.status === "published" && !dirty && !unpublished && <p role="status" className="text-sm text-emerald-300">{publishState.message}</p>}
+          {statusState.status === "error" && <p role="alert" className="text-sm text-red-300">{statusState.message}</p>}
+          {statusState.status === "success" && flow.status === "active" && <p role="status" className="text-sm text-emerald-300">{statusState.message}</p>}
           {publishState.status === "error" && <p role="alert" className="text-sm text-red-300">{publishState.message}</p>}
           {!canPublish && !conflict && (
             <p className="text-xs text-muted-2">
@@ -380,10 +394,11 @@ export function FlowEditor({
           )}
         </section>
 
-        {/* Painel ao lado, por cima da página: o formulário continua editável e a prévia acompanha. */}
+        {/* Com largura de sobra (1400 px), painel ao lado e a página reserva o espaço: o formulário continua
+            editável e a prévia acompanha. Abaixo disso, a prévia ocupa a tela toda (✕ fecha). */}
         {previewOpen && (
-          <div className="fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col p-3 sm:left-auto sm:w-[24rem]">
-            <FlowPreview definition={definition} humanHandoffAvailable={humanHandoffAvailable} onClose={() => setPreviewOpen(false)} />
+          <div className="fixed inset-x-0 bottom-0 top-16 z-40 flex flex-col p-3 min-[1400px]:left-auto min-[1400px]:w-[24rem]">
+            <FlowPreview definition={definition} flowStatus={flow.status} humanHandoffAvailable={humanHandoffAvailable} onClose={() => setPreviewOpen(false)} />
           </div>
         )}
       </div>

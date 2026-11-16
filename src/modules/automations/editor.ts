@@ -590,3 +590,17 @@ export function editorIssues(definition: EditorDefinition): EditorIssue[] {
 export function hasBlockingIssues(issues: EditorIssue[]): boolean {
   return issues.some((issue) => issue.severity === "error");
 }
+
+/**
+ * Indicador de "automação de entrada" conforme o status: só quem está ativa
+ * responde de fato às conversas novas; pausada ou ainda não publicada, não.
+ */
+export function entryIndicator(
+  status: "draft" | "active" | "paused",
+  isEntry: boolean,
+): { label: string; tone: "gold" | "amber" | "zinc" } | null {
+  if (!isEntry) return null;
+  if (status === "active") return { label: "Responde às conversas novas", tone: "gold" };
+  if (status === "paused") return { label: "Pausada: não responde às conversas novas", tone: "amber" };
+  return { label: "Responderá às conversas novas ao publicar", tone: "zinc" };
+}

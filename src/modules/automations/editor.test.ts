@@ -8,6 +8,7 @@ import {
   cleanDefinition,
   describeReference,
   editorIssues,
+  entryIndicator,
   flowOutline,
   hasBlockingIssues,
   insertStep,
@@ -390,4 +391,12 @@ test("removeOption e insertStep: a primeira etapa nova vira o início de um flux
   assert.equal(withMenu.entryStepId, step.id);
   const withoutOption = removeOption(withMenu, step.id, step.options[0].id);
   assert.equal(editorIssues(withoutOption).find((issue) => issue.field === "options")?.message, "Adicione pelo menos uma opção.");
+});
+
+test("indicador de entrada: só diz que responde quando a automação está ativa", () => {
+  assert.equal(entryIndicator("active", false), null);
+  assert.equal(entryIndicator("paused", false), null);
+  assert.deepEqual(entryIndicator("active", true), { label: "Responde às conversas novas", tone: "gold" });
+  assert.match(entryIndicator("paused", true)?.label ?? "", /^Pausada: não responde/);
+  assert.match(entryIndicator("draft", true)?.label ?? "", /ao publicar$/);
 });

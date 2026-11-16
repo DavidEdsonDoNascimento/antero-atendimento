@@ -9,6 +9,7 @@ import { IconFlows } from "@/components/ui/icons";
 import { PageHeader } from "@/components/ui/page-header";
 import { organizationContextOf, requireModule } from "@/lib/auth/dal";
 import { automationFlowStatusLabel, automationFlowStatusTone } from "@/lib/labels";
+import { entryIndicator } from "@/modules/automations/editor";
 import { listFlows } from "@/modules/automations/sql-queries";
 
 import { FlowStatusForm } from "./_components/flow-status-form";
@@ -56,7 +57,9 @@ export default async function FluxosPage() {
         />
       ) : (
         <Card className="divide-y divide-line">
-          {flows.map((flow) => (
+          {flows.map((flow) => {
+            const entryBadge = entryIndicator(flow.status, flow.isEntry);
+            return (
             <div key={flow.id} className="flex flex-col gap-3 px-5 py-4 md:flex-row md:items-center md:justify-between">
               <div className="min-w-0 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -68,7 +71,7 @@ export default async function FluxosPage() {
                     <p className="truncate text-sm font-medium text-foreground">{flow.name}</p>
                   )}
                   <Badge tone={automationFlowStatusTone[flow.status]}>{automationFlowStatusLabel[flow.status]}</Badge>
-                  {flow.isEntry && <Badge tone="gold">Responde às conversas novas</Badge>}
+                  {entryBadge && <Badge tone={entryBadge.tone}>{entryBadge.label}</Badge>}
                   {flow.publishedVersion !== null && flow.hasDraftChanges && <Badge tone="blue">Alterações não publicadas</Badge>}
                 </div>
                 <p className="text-xs text-muted-2">
@@ -95,7 +98,8 @@ export default async function FluxosPage() {
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
         </Card>
       )}
       <p className="text-xs text-muted-2">
