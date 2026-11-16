@@ -90,7 +90,9 @@ export async function setOrganizationStatus(context: {
       return rows[0].status;
     });
   } catch (error) {
-    if (sqlStateOf(error) === "42501") throw new AccessDeniedError();
+    const sqlState = sqlStateOf(error);
+    if (sqlState === "42501") throw new AccessDeniedError();
+    if (sqlState === "P0002") throw new OrganizationNotFoundError();
     throw queryFailure("Falha ao alterar a situação da organização", error);
   }
 }

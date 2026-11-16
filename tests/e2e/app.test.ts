@@ -321,18 +321,36 @@ const statusOf = async (organizationId: string) =>
   (await fixture.query("SELECT status FROM public.organizations WHERE id = $1", [organizationId])).rows[0].status as string;
 
 /**
- * Chama a Server Action como um POST direto, sem a interface: formulário
- * multipart com o id da ação tirado do HTML de /admin (`$ACTION_ID_...`).
+ * Chama a Server Action de situação como um POST direto, sem a interface, no
+ * formato que o React usa com `useActionState` (id no cabeçalho, campos no corpo).
+ * Desde a G2B a ação devolve uma mensagem (como a de módulos) em vez de levar à
+ * página de erro.
  */
 async function postStatusAction(client: Client, actionId: string, organizationId: string, status: string) {
   const form = new FormData();
-  form.set(`$ACTION_ID_${actionId}`, "");
-  form.set("organizationId", organizationId);
-  form.set("status", status);
-  const headers = new Headers({ "x-forwarded-for": client.ip, origin: ORIGIN });
+  form.set("_1_organizationId", organizationId);
+  form.set("_1_status", status);
+  form.set("0", JSON.stringify(["$undefined", "$K1"]));
+  const headers = new Headers({ "x-forwarded-for": client.ip, origin: ORIGIN, "next-action": actionId, accept: "text/x-component" });
   if (client.cookies.size) headers.set("cookie", [...client.cookies].map(([k, v]) => `${k}=${v}`).join("; "));
-  return fetch(`${BASE}/admin`, { method: "POST", headers, body: form, redirect: "manual" });
+  const response = await fetch(`${BASE}/admin`, { method: "POST", headers, body: form, redirect: "manual" });
+  return {
+    status: response.status,
+    text: await response.text(),
+    redirect: response.headers.get("x-action-redirect") ?? response.headers.get("location"),
+  };
 }
+
+/** Id da ação do formulário de situação (o que tem `name="status"`). */
+const statusActionIdOf = (html: string) => {
+  const form = html.split("<form").find((segment) => segment.includes('name="status"')) ?? "";
+  return (
+    /\$ACTION_ID_([0-9a-f]{20,})/.exec(form)?.[1] ??
+    /&quot;id&quot;:&quot;([0-9a-f]{20,})&quot;/.exec(form)?.[1] ??
+    /"id":"([0-9a-f]{20,})"/.exec(form)?.[1]
+  );
+};
+const STATUS_CHANGED = /Organização (suspensa|reativada)\./;
 
 test("suspensão: sessão existente perde o acesso e vê a tela própria; URL direta não contorna; reativação restaura", async () => {
   // Login novo: a sessão do aOwner foi revogada em um teste anterior.
@@ -401,34 +419,44 @@ test("Server Action de status: só o admin da plataforma; POST direto de outros 
   const attendant = await loggedIn("aAttendant");
 
   const adminPage = await platformAdmin.page("/admin");
-  const actionId = /\$ACTION_ID_([0-9a-f]+)/.exec(adminPage.html)?.[1];
+  const actionId = statusActionIdOf(adminPage.html);
   assert.ok(actionId, "formulário da ação em /admin");
 
   // Sem sessão, atendente e owner, inclusive o owner tentando se reativar.
-  for (const client of [new Client(), attendant, owner]) {
+  const anonymous = await postStatusAction(new Client(), actionId, f!.orgB, "inactive");
+  assert.equal(anonymous.status, 307, "sem sessão: o proxy leva ao login");
+  for (const client of [attendant, owner]) {
     const denied = await postStatusAction(client, actionId, f!.orgB, "inactive");
-    assert.notEqual(denied.status, 200);
+    assert.match(denied.redirect ?? "", /\/visao-geral/, "sem o papel: o DAL redireciona");
+    assert.doesNotMatch(denied.text, STATUS_CHANGED);
     assert.equal(await statusOf(f!.orgB), "active");
   }
   await setStatus(f!.orgA, "inactive");
   try {
     const denied = await postStatusAction(owner, actionId, f!.orgA, "active");
-    assert.notEqual(denied.status, 200);
+    assert.match(denied.redirect ?? "", /\/visao-geral/);
+    assert.doesNotMatch(denied.text, STATUS_CHANGED);
     assert.equal(await statusOf(f!.orgA), "inactive");
 
     // O admin da plataforma vê a suspensa em /admin, mesmo sem organização ativa.
     assert.match((await platformAdmin.page("/admin")).html, /Suspensa/);
+    // Entrada inválida e organização inexistente: mensagem, sem página de erro e sem efeito.
     const invalid = await postStatusAction(platformAdmin, actionId, "nao-e-uuid", "active");
-    assert.notEqual(invalid.status, 200);
+    assert.match(invalid.text, /Dados inválidos/);
+    assert.match((await postStatusAction(platformAdmin, actionId, f!.orgA, "talvez")).text, /Dados inválidos/);
+    assert.match(
+      (await postStatusAction(platformAdmin, actionId, "00000000-0000-4000-8000-000000000000", "active")).text,
+      /Organização não encontrada/,
+    );
     assert.equal(await statusOf(f!.orgA), "inactive");
 
     const allowed = await postStatusAction(platformAdmin, actionId, f!.orgA, "active");
-    assert.ok(allowed.status < 400, `status ${allowed.status}`);
+    assert.match(allowed.text, /Organização reativada\./);
     assert.equal(await statusOf(f!.orgA), "active");
     assert.equal((await owner.page("/conversas")).status, 200);
 
     const suspend = await postStatusAction(platformAdmin, actionId, f!.orgA, "inactive");
-    assert.ok(suspend.status < 400, `status ${suspend.status}`);
+    assert.match(suspend.text, /Organização suspensa\./);
     assert.equal(await statusOf(f!.orgA), "inactive");
     assert.equal((await owner.page("/conversas")).redirect, "/organizacao-suspensa");
   } finally {
@@ -841,15 +869,15 @@ test("central: suspender e reativar continuam funcionando pelo detalhe, sem toca
 
   const active = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
   assert.match(textOf(active.html), /Confirmar suspensão/);
-  const suspendId = /\$ACTION_ID_([0-9a-f]+)/.exec(active.html)?.[1];
+  const suspendId = statusActionIdOf(active.html);
   assert.ok(suspendId, "formulário de suspensão no detalhe");
   try {
-    assert.equal((await postStatusAction(platformAdmin, suspendId, f!.orgC, "inactive")).status < 400, true);
+    assert.match((await postStatusAction(platformAdmin, suspendId, f!.orgC, "inactive")).text, /Organização suspensa\./);
     assert.equal(await statusOf(f!.orgC), "inactive");
     const suspended = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
     assert.match(textOf(suspended.html), /Organização suspensa/);
     assert.match(textOf(suspended.html), /Reativar/);
-    assert.equal((await postStatusAction(platformAdmin, suspendId, f!.orgC, "active")).status < 400, true);
+    assert.match((await postStatusAction(platformAdmin, suspendId, f!.orgC, "active")).text, /Organização reativada\./);
     assert.equal(await statusOf(f!.orgC), "active");
   } finally {
     await setStatus(f!.orgC, "active");
@@ -857,3 +885,4 @@ test("central: suspender e reativar continuam funcionando pelo detalhe, sem toca
   const after = await fixture.query("SELECT module::text, enabled FROM public.organization_modules WHERE organization_id = $1 ORDER BY module", [f!.orgC]);
   assert.deepEqual(after.rows, before.rows);
 });
+
