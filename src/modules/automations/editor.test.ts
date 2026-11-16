@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import { DEMO_FLOW_DEFINITION } from "../simulator/demo-flow.ts";
-import { parseFlowDefinition, type FlowDefinition } from "./definition.ts";
+import { flowMediaIds, parseFlowDefinition, type FlowDefinition } from "./definition.ts";
 import {
   addOption,
   cleanDefinition,
@@ -399,4 +399,24 @@ test("indicador de entrada: só diz que responde quando a automação está ativ
   assert.deepEqual(entryIndicator("active", true), { label: "Responde às conversas novas", tone: "gold" });
   assert.match(entryIndicator("paused", true)?.label ?? "", /^Pausada: não responde/);
   assert.match(entryIndicator("draft", true)?.label ?? "", /ao publicar$/);
+});
+
+test("imagens enviadas de um fluxo: só os mediaId das etapas de imagem, sem repetição", () => {
+  const a = "11111111-1111-4111-8111-111111111111";
+  const b = "22222222-2222-4222-8222-222222222222";
+  const definition = {
+    schemaVersion: 1,
+    entryStepId: "um",
+    steps: [
+      { type: "image", id: "um", mediaId: a, next: "dois" },
+      { type: "image", id: "dois", mediaId: a, next: "tres" },
+      { type: "image", id: "tres", mediaId: b, next: "quatro" },
+      { type: "image", id: "quatro", url: "https://exemplo.com/a.jpg", next: "fim" },
+      { type: "end", id: "fim" },
+    ],
+  };
+  const parsed = parseFlowDefinition(definition);
+  assert.ok(parsed.ok);
+  assert.deepEqual(flowMediaIds(parsed.definition).sort(), [a, b]);
+  assert.deepEqual(flowMediaIds(DEMO_FLOW_DEFINITION as FlowDefinition), []);
 });

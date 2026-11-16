@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/ui/page-header";
 import { organizationContextOf, requireModule } from "@/lib/auth/dal";
 import { automationFlowStatusLabel, automationFlowStatusTone } from "@/lib/labels";
 import { entryIndicator } from "@/modules/automations/editor";
+import { MODULE_CATALOG } from "@/modules/organizations/modules";
 import { listFlows } from "@/modules/automations/sql-queries";
 
 import { FlowStatusForm } from "./_components/flow-status-form";
@@ -38,6 +39,9 @@ export default async function FluxosPage() {
         description="Mensagens, menus e perguntas que respondem seus clientes automaticamente."
         actions={flows.length > 0 ? createLink : undefined}
       />
+      <p className="rounded-md border border-sky-500/30 bg-sky-500/5 px-3 py-2 text-sm text-sky-100">
+        {MODULE_CATALOG.automacoes.limitation}
+      </p>
       {!active.modules.includes("atendimento") && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm text-amber-100">
           Sua organização não tem o módulo Atendimento: as automações funcionam, mas não conseguem passar a conversa

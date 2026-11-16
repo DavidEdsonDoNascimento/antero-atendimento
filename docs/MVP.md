@@ -37,9 +37,19 @@ Concluído:
 - [x] `.env.example` e documentação de setup
 - [x] Lint, type-check e build passando
 
+Entregue depois do Ciclo 1 (detalhes em `docs/ATENDIMENTO.md`, `docs/AUTOMACOES.md` e
+`docs/MODULES.md`):
+
+- Inbox funcional: assumir, responder e resolver conversas, com aviso da janela de 24 h
+  (canal de desenvolvimento e simulador de mensagens recebidas; sem WhatsApp real)
+- Módulos por organização, habilitados pelo admin da plataforma
+- Automações: motor de fluxos e editor self-service em `/fluxos` (criar, editar, testar
+  na prévia, publicar, histórico e restauração de versões, imagens); o envio em
+  conversas reais do WhatsApp ainda depende de integrações futuras (webhook e Cloud API)
+
 Marcado como “Em breve” na interface (não são botões falsos):
 
-- Contatos, Automações e Campanhas: módulos habilitáveis, ainda em desenvolvimento
+- Contatos e Campanhas: módulos habilitáveis, ainda em desenvolvimento
 - Edição de organização e convite de usuários por e-mail (ciclos futuros)
 
 ## Telas
@@ -50,13 +60,18 @@ Marcado como “Em breve” na interface (não são botões falsos):
 - **Equipe** — lista real de membros (nome, e-mail, papel, status).
 - **Configurações** — dados da organização e do canal de WhatsApp (provedor de
   desenvolvimento), somente leitura no Ciclo 1.
+- **Conversas** — Inbox com filtros, histórico, assumir, responder e resolver
+  (`docs/ATENDIMENTO.md`).
+- **Automações** — lista, editor, prévia, publicação e histórico de versões
+  (`docs/AUTOMACOES.md`); só owner/admin editam.
 - **Admin da plataforma** — lista de organizações, com suspensão, reativação e
   configuração de módulos (apenas `is_platform_admin`). Ver `docs/MODULES.md`.
 
 ## Fora do escopo do MVP
 
 Pagamentos/assinaturas, IA generativa, CRM completo, app mobile, microsserviços, construtor visual avançado de fluxos.
-Campanhas e automações já são módulos habilitáveis, mas ainda sem funcionalidade.
+Campanhas e Contatos já são módulos habilitáveis, mas ainda sem funcionalidade; Automações tem editor e motor, mas ainda não
+responde no WhatsApp real.
 Também: não alterar o site institucional, não reutilizar o banco do site, não
 colocar tokens no código, não usar dados fixos da Antero nos componentes.
 

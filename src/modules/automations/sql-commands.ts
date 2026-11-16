@@ -5,7 +5,7 @@ import { randomBytes } from "node:crypto";
 import { sqlStateOf, withModuleTransaction, type DbTransaction, type OrganizationContext } from "@/lib/db";
 
 // Extensão .ts explícita nas importações de VALOR (ver nota em cursor.ts).
-import { parseFlowDefinition, parseFlowDraft } from "./definition.ts";
+import { flowMediaIds, parseFlowDefinition, parseFlowDraft, type FlowDefinition } from "./definition.ts";
 import { cleanDefinition, starterDefinition } from "./editor.ts";
 import { normalizeText } from "./text.ts";
 
@@ -30,7 +30,8 @@ export type FlowCommandErrorCode =
   | "access_denied"
   | "media_size"
   | "media_type"
-  | "media_quota";
+  | "media_quota"
+  | "media_unavailable";
 
 export class FlowCommandError extends Error {
   readonly code: FlowCommandErrorCode;
@@ -161,6 +162,29 @@ export async function createFlow(context: OrganizationContext, input: { name: st
 }
 
 /**
+ * Toda imagem enviada (`mediaId`) do fluxo precisa existir em `automation_media`
+ * DESTA organização. Inexistente e de outra organização dão o mesmo erro, sem
+ * dizer qual dos dois (não revela imagens alheias). Roda na transação da
+ * publicação, DEPOIS de `publish_automation_flow`, que confere o papel, trava a
+ * linha do fluxo e recusa se a revisão mudou (AU002): o conteúdo conferido aqui
+ * é exatamente o publicado, e o erro desfaz a versão criada. Imagens não são
+ * alteradas nem apagadas pela aplicação, então a posse não muda até o COMMIT.
+ */
+async function assertMediaOwnership(
+  tx: DbTransaction,
+  context: OrganizationContext,
+  definition: FlowDefinition,
+): Promise<void> {
+  const wanted = flowMediaIds(definition);
+  if (wanted.length === 0) return;
+  const { rows } = await tx.query<{ id: string }>(
+    "SELECT id FROM public.automation_media WHERE organization_id = $1::uuid AND id = ANY($2::uuid[])",
+    [context.organizationId, wanted],
+  );
+  if (rows.length !== wanted.length) throw new FlowCommandError("media_unavailable");
+}
+
+/**
  * Publica o rascunho atual como nova versão imutável. Valida de novo o rascunho
  * gravado e publica exatamente essa revisão: outra gravação no meio é recusada.
  * `expectedRevision`: a revisão que quem confirmou a publicação viu.
@@ -185,6 +209,9 @@ export async function publishFlow(
       "SELECT version_id, version FROM public.publish_automation_flow($1::uuid, $2::uuid, $3::integer)",
       [context.organizationId, flowId, draft.draft_revision],
     );
+    // Depois do banco autorizar e travar o fluxo (papel, módulo, revisão): se a
+    // imagem não for da organização, o erro desfaz a versão criada acima.
+    await assertMediaOwnership(tx, context, parsed.definition);
     return { versionId: rows[0].version_id, version: rows[0].version };
   });
 }

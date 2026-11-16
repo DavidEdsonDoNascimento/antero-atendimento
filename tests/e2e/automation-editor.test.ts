@@ -167,6 +167,9 @@ test("owner cria, monta, salva, testa, publica, altera, publica de novo e restau
   const list = await owner.page("/fluxos");
   assert.equal(list.status, 200);
   assert.match(list.html, /Nenhuma automação ainda/);
+  // Estado do módulo: editor disponível, WhatsApp real ainda depende de integrações.
+  assert.match(list.html, /O editor está disponível/);
+  assert.match(list.html, /depende de integrações em desenvolvimento/);
   const createPage = await owner.page("/fluxos/novo");
   const createId = actionIdIn(createPage.html, 'name="name"');
   const created = await owner.action("/fluxos/novo", createId, { name: "Atendimento do Sítio (fictício)", isEntry: "on" });
@@ -349,4 +352,46 @@ test("sem permissão: atendente, outra organização e organização manipulada 
   const anonymous = await fetch(`${BASE}/fluxos/imagens/${mediaId}`, { redirect: "manual", headers: { "x-forwarded-for": uniqueIp() } });
   assert.equal(anonymous.status, 307);
   assert.match(anonymous.headers.get("location") ?? "", /\/login/);
+});
+
+test("publicar por POST direto: imagem de outra organização é recusada; a própria é aceita", async () => {
+  const owner = await login("aOwner");
+  const flow = await row("SELECT id, name, is_entry FROM public.automation_flows WHERE organization_id = $1 AND name LIKE 'Atendimento do Sítio%'", [f.orgA]);
+  const editorPath = `/fluxos/${flow.id}`;
+  const editor = await owner.page(editorPath);
+  const saveId = actionIdIn(editor.html, 'name="snapshot"');
+  const publishId = actionIdIn(editor.html, "Publicar versão");
+
+  const jpeg = (label: string) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.from(label)]);
+  const foreign = await uploadFlowImage({ userId: f.users.bOwner, organizationId: f.orgB }, { fileName: "de-b.jpg", data: jpeg("e2e-b") });
+  const mine = await uploadFlowImage({ userId: f.users.aOwner, organizationId: f.orgA }, { fileName: "de-a.jpg", data: jpeg("e2e-a") });
+
+  const withImage = async (mediaId: string) => {
+    const current = await flowRow(flow.id);
+    const definition = toEditorDefinition(current.draft_definition)!;
+    const edited = updateStep(
+      definition,
+      definition.steps[0].id,
+      (step) => ({ id: step.id, name: step.name, type: "image", mediaId, next: (step as { next: string }).next }) as EditorStep,
+    );
+    const saved = await owner.action(editorPath, saveId, {
+      flowId: flow.id,
+      expectedRevision: String(current.draft_revision),
+      snapshot: snapshotOf(flow.name, flow.is_entry, edited),
+    });
+    assert.match(saved.text, /Rascunho salvo/);
+    return (await flowRow(flow.id)).draft_revision as number;
+  };
+  const versions = await versionCount(flow.id);
+  const unavailable = /não está disponível para a sua organização/;
+
+  const badRevision = await withImage(foreign.mediaId);
+  const refused = await owner.action(editorPath, publishId, { flowId: flow.id, expectedRevision: String(badRevision) });
+  assert.match(refused.text, unavailable);
+  assert.ok(!refused.text.includes(foreign.mediaId), "a resposta não repete o id da imagem de outra organização");
+  assert.equal(await versionCount(flow.id), versions);
+
+  const goodRevision = await withImage(mine.mediaId);
+  assert.match((await owner.action(editorPath, publishId, { flowId: flow.id, expectedRevision: String(goodRevision) })).text, /Versão \d+ publicada/);
+  assert.equal(await versionCount(flow.id), versions + 1);
 });

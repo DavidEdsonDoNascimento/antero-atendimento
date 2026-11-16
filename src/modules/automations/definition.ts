@@ -319,6 +319,15 @@ export function draftGraphIssues(draft: FlowDefinitionInput): GraphIssue[] {
   return graphIssues(draft as z.infer<typeof baseDefinitionSchema>);
 }
 
+/** Ids das imagens enviadas pelo painel (`mediaId`) usadas pelo fluxo, sem repetição. */
+export function flowMediaIds(definition: FlowDefinition): string[] {
+  const ids = new Set<string>();
+  for (const step of definition.steps) {
+    if (step.type === "image" && step.mediaId !== undefined) ids.add(step.mediaId);
+  }
+  return [...ids];
+}
+
 export type DefinitionValidation =
   | { ok: true; definition: FlowDefinition }
   | { ok: false; issues: { path: string; message: string }[] };

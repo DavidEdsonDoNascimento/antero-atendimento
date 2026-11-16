@@ -155,6 +155,19 @@ e no banco; a mesma imagem enviada de novo é reaproveitada (sha256); cota de
 Imagens não são apagadas nem alteradas (uma versão publicada pode usá-las).
 O link `https` externo continua aceito.
 
+**Posse das imagens na publicação.** `publishFlow` (`modules/automations/sql-commands.ts`)
+confere que todo `mediaId` do fluxo existe em `automation_media` **da organização que
+publica**; imagem inexistente e imagem de outra organização recebem o mesmo erro
+(`media_unavailable`: "não está disponível para a sua organização"), sem repetir o id nem
+dizer qual dos dois casos. A conferência roda na transação da publicação, depois de
+`publish_automation_flow` autorizar (papel, módulo, organização ativa), travar o fluxo e
+confirmar a revisão (`AU002`): o conteúdo conferido é o publicado, e o erro desfaz a versão
+criada. O rascunho continua aceitando qualquer id (trabalho em andamento) e restaurar
+não publica; só publicar é barrado. A conferência é da aplicação, no mesmo limite de
+confiança da validação do schema do fluxo (`save/publish_automation_flow` conferem só o
+formato); a E2C deve repetir a regra no banco e ler a imagem por (organização da
+versão, id) ao enviá-la (ver Pendências).
+
 Envio real (E2C): a Cloud API não recebe o arquivo do nosso banco por link; o
 provedor `cloud_api` deve carregá-lo na Meta (`POST /{phone_number_id}/media`) e
 enviar pelo id da mídia lá. Até isso existir, `toCloudApiMessage` recusa ações
@@ -328,11 +341,11 @@ Do editor (E3B):
   limpar órfãs exige rotina própria.
 - Envio de imagem enviada pelo painel pela Cloud API depende da E2C (upload na
   Meta); hoje só o canal de desenvolvimento a "envia".
-- A publicação não confere que o `mediaId` de uma imagem pertence à organização
-  do fluxo (um POST manual poderia gravar o id de outra). Não vaza nada — a rota
-  e a RLS só entregam imagens da própria organização, e o id é um uuid aleatório —,
-  mas a E2C deve ler a imagem escopada pela organização ao enviá-la à Meta e
-  tratar a ausência como falha de envio.
+- A posse do `mediaId` é conferida na publicação pela aplicação (G0), não pelo banco:
+  `publish_automation_flow` não a verifica. Versões já publicadas não foram revarridas (no banco de
+  desenvolvimento, em 2026-11-16: 0 imagens e nenhuma versão ou rascunho com `mediaId`). Antes de liberar o envio real, a E2C deve
+  repetir a regra em `publish_automation_flow` (migration), ler a imagem escopada por
+  (organização da versão, id) ao enviá-la à Meta e tratar a ausência como falha de envio.
 - Sem edição simultânea: conflito é detectado e recusado, não mesclado.
 - Tipos de pergunta são só texto livre com tamanho (o que o motor suporta);
   data, número e opções fechadas ficam para depois.

@@ -18,6 +18,12 @@ export type ModuleDefinition = {
   requires: OrganizationModule[];
   /** Falso enquanto a página é só "em desenvolvimento": o painel avisa quem habilita. */
   implemented: boolean;
+  /**
+   * O módulo já funciona na plataforma, mas não por completo: texto mostrado a
+   * quem habilita (painel) e a quem usa (página do módulo). Só descreve; não é
+   * configuração por organização nem bloqueia nada. Remover quando deixar de valer.
+   */
+  limitation?: string;
   /** Rotas exclusivas do módulo; cada página delas chama `requireModule`. */
   routes: string[];
 };
@@ -34,7 +40,9 @@ export const MODULE_CATALOG: Record<OrganizationModule, ModuleDefinition> = {
     label: "Automações",
     description: "Fluxos, menus e respostas automáticas.",
     requires: [],
-    implemented: false,
+    implemented: true,
+    limitation:
+      "O editor está disponível: dá para criar, editar, testar e publicar automações. O envio em conversas reais do WhatsApp ainda depende de integrações em desenvolvimento; por enquanto, o teste é pela prévia e pelo simulador.",
     routes: ["/fluxos"],
   },
   campanhas: {

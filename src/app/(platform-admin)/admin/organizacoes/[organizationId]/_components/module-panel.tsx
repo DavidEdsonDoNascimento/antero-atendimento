@@ -76,8 +76,12 @@ export function ModulePanel({
                   <h2 className="text-sm font-semibold text-foreground">{definition.label}</h2>
                   <Badge tone={isEnabled ? "green" : "zinc"}>{isEnabled ? "Habilitado" : "Desabilitado"}</Badge>
                   {!definition.implemented && <Badge tone="amber">Em desenvolvimento</Badge>}
+                  {definition.implemented && definition.limitation && <Badge tone="blue">Editor disponível</Badge>}
                 </div>
                 <p className="text-sm text-muted">{definition.description}</p>
+                {definition.implemented && definition.limitation && (
+                  <p className="text-xs text-amber-300">{definition.limitation}</p>
+                )}
                 {definition.requires.length > 0 && (
                   <p className="text-xs text-muted-2">
                     Depende de {definition.requires.map((other) => MODULE_CATALOG[other].label).join(", ")}.

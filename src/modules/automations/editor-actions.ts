@@ -37,6 +37,7 @@ const MESSAGES: Record<FlowCommandErrorCode, string> = {
   media_size: "A imagem precisa ter até 5 MB.",
   media_type: "Envie uma imagem JPG ou PNG.",
   media_quota: "Sua organização atingiu o limite de imagens (100 imagens ou 100 MB).",
+  media_unavailable: "Uma imagem desta automação não está disponível para a sua organização. Escolha a imagem de novo em cada etapa de imagem.",
 };
 
 const ADMIN_ONLY = MESSAGES.access_denied;
