@@ -262,6 +262,118 @@ test("isolamento: owner de B não lê nem altera fluxos, versões ou imagens de 
   assert.equal((await getFlowForEditor(owner(), flowId))?.publishedVersion, 1);
 });
 
+/** Troca a primeira etapa (boas-vindas) por uma etapa de imagem enviada e grava o rascunho. */
+async function saveWithImage(flowId: string, mediaId: string, userId = f.users.aOwner) {
+  const { flow, definition } = await draftOf(flowId);
+  const edited = updateStep(
+    definition,
+    definition.steps[0].id,
+    (step) => ({ id: step.id, name: step.name, type: "image", mediaId, next: (step as { next: string }).next }) as EditorStep,
+  );
+  return saveFlowDraftById(ctx(userId), flowId, {
+    name: flow.name,
+    definition: cleanDefinition(edited),
+    isEntry: flow.isEntry,
+    expectedRevision: flow.draftRevision,
+  });
+}
+
+/** Versões publicadas do fluxo que citam o id de imagem (conferência pelo dono das tabelas). */
+const versionsWithMedia = async (flowId: string, mediaId: string) =>
+  (await fixture.query("SELECT version FROM public.automation_flow_versions WHERE flow_id = $1 AND definition::text LIKE $2", [flowId, `%${mediaId}%`]))
+    .rows.length;
+
+const MISSING_MEDIA = "00000000-0000-4000-8000-000000000999";
+
+test("publicar: imagem da própria organização é aceita; fluxo sem imagem continua publicando", async () => {
+  const plain = await createFlow(owner(), { name: "Sem imagem", isEntry: false });
+  assert.equal((await publishFlow(owner(), plain.flowId, 1)).version, 1);
+
+  const { mediaId } = await uploadFlowImage(owner(), { fileName: "propria.jpg", data: Buffer.concat([JPEG, Buffer.from("propria")]) });
+  const { flowId } = await createFlow(owner(), { name: "Com imagem", isEntry: false });
+  const saved = await saveWithImage(flowId, mediaId);
+  const published = await publishFlow(owner(), flowId, saved.draftRevision);
+  assert.equal(published.version, 1);
+  assert.equal(await versionsWithMedia(flowId, mediaId), 1);
+
+  // Histórico e restauração seguem funcionando com a imagem.
+  const version = await getFlowVersion(owner(), flowId, 1);
+  assert.ok(JSON.stringify(version?.definition).includes(mediaId));
+  const restored = await restoreFlowVersion(owner(), flowId, { version: 1, expectedRevision: saved.draftRevision });
+  assert.equal((await publishFlow(owner(), flowId, restored.draftRevision)).version, 2);
+});
+
+test("publicar: imagem de outra organização ou inexistente é recusada, sem publicar e sem revelar qual dos dois", async () => {
+  const ownerB = ctx(f.users.bOwner, f.orgB);
+  const foreign = await uploadFlowImage(ownerB, { fileName: "de-b.jpg", data: Buffer.concat([JPEG, Buffer.from("de-b")]) });
+
+  for (const mediaId of [foreign.mediaId, MISSING_MEDIA]) {
+    const { flowId } = await createFlow(owner(), { name: "Imagem alheia", isEntry: false });
+    // O rascunho aceita o id (pode ser trabalho em andamento); publicar é que barra.
+    const saved = await saveWithImage(flowId, mediaId);
+    const refused = await publishFlow(owner(), flowId, saved.draftRevision).then(
+      () => null,
+      (error: unknown) => error,
+    );
+    assert.ok(refused instanceof FlowCommandError && refused.code === "media_unavailable");
+    assert.ok(!refused.message.includes(mediaId) && refused.issues.length === 0, "o erro não repete o id nem detalha");
+    assert.equal((await getFlowForEditor(owner(), flowId))?.publishedVersion, null);
+    assert.equal(await versionsWithMedia(flowId, mediaId), 0);
+    // Sem a revisão do editor (uso da ferramenta de desenvolvimento): mesma regra.
+    await assert.rejects(publishFlow(owner(), flowId), code("media_unavailable"));
+  }
+  // A imagem de B continua só de B.
+  assert.ok((await listFlowImages(owner())).every((image) => image.id !== foreign.mediaId));
+  assert.equal(await getFlowImageContent(owner(), foreign.mediaId), null);
+});
+
+test("publicar: corrigir a imagem libera a publicação; rascunho alterado depois da conferência não passa", async () => {
+  const ownerB = ctx(f.users.bOwner, f.orgB);
+  const foreign = await uploadFlowImage(ownerB, { fileName: "de-b-2.jpg", data: Buffer.concat([JPEG, Buffer.from("de-b-2")]) });
+  const mine = await uploadFlowImage(owner(), { fileName: "minha.jpg", data: Buffer.concat([JPEG, Buffer.from("minha")]) });
+  const { flowId } = await createFlow(owner(), { name: "Corrigir", isEntry: false });
+
+  // Rascunho válido na revisão N; outra gravação troca por imagem alheia (N+1).
+  const good = await saveWithImage(flowId, mine.mediaId);
+  const bad = await saveWithImage(flowId, foreign.mediaId);
+  // Quem confirmou a revisão antiga não publica a nova.
+  await assert.rejects(publishFlow(owner(), flowId, good.draftRevision), code("draft_changed"));
+  await assert.rejects(publishFlow(owner(), flowId, bad.draftRevision), code("media_unavailable"));
+
+  const fixed = await saveWithImage(flowId, mine.mediaId);
+  assert.equal((await publishFlow(owner(), flowId, fixed.draftRevision)).version, 1);
+  assert.equal(await versionsWithMedia(flowId, foreign.mediaId), 0);
+});
+
+test("publicar em paralelo com a troca da imagem: nunca fica publicada uma imagem de outra organização", async () => {
+  const ownerB = ctx(f.users.bOwner, f.orgB);
+  const foreign = await uploadFlowImage(ownerB, { fileName: "de-b-3.jpg", data: Buffer.concat([JPEG, Buffer.from("de-b-3")]) });
+  const mine = await uploadFlowImage(owner(), { fileName: "minha-3.jpg", data: Buffer.concat([JPEG, Buffer.from("minha-3")]) });
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const { flowId } = await createFlow(owner(), { name: `Corrida ${attempt}`, isEntry: false });
+    const good = await saveWithImage(flowId, mine.mediaId);
+    await Promise.allSettled([publishFlow(owner(), flowId, good.draftRevision), saveWithImage(flowId, foreign.mediaId)]);
+    assert.equal(await versionsWithMedia(flowId, foreign.mediaId), 0, "nenhuma versão publicada cita a imagem alheia");
+  }
+});
+
+test("publicar com imagem: permissões preservadas (atendente, vínculo desativado, sem vínculo e organização errada)", async () => {
+  const mine = await uploadFlowImage(owner(), { fileName: "perm.jpg", data: Buffer.concat([JPEG, Buffer.from("perm")]) });
+  const { flowId } = await createFlow(owner(), { name: "Permissões", isEntry: false });
+  const saved = await saveWithImage(flowId, mine.mediaId);
+  await assert.rejects(publishFlow(attendant(), flowId, saved.draftRevision), code("access_denied"));
+  await assert.rejects(publishFlow(ctx(f.users.aDisabled), flowId, saved.draftRevision), AccessDeniedError);
+  await assert.rejects(publishFlow(ctx(f.users.nobody), flowId, saved.draftRevision), AccessDeniedError);
+  // Dono de B com organizationId de A: sem vínculo. Com a própria organização: o fluxo não existe.
+  await assert.rejects(publishFlow(ctx(f.users.bOwner, f.orgA), flowId, saved.draftRevision), AccessDeniedError);
+  await assert.rejects(publishFlow(ctx(f.users.bOwner, f.orgB), flowId, saved.draftRevision), code("not_found"));
+  // Com imagem alheia no rascunho, o atendente continua recebendo "sem permissão", não o erro da imagem.
+  const foreign = await uploadFlowImage(ctx(f.users.bOwner, f.orgB), { fileName: "de-b-4.jpg", data: Buffer.concat([JPEG, Buffer.from("de-b-4")]) });
+  const swapped = await saveWithImage(flowId, foreign.mediaId);
+  await assert.rejects(publishFlow(attendant(), flowId, swapped.draftRevision), code("access_denied"));
+  assert.equal((await getFlowForEditor(owner(), flowId))?.publishedVersion, null);
+});
+
 test("imagens: JPEG e PNG pela assinatura, mesma imagem reaproveitada, tamanho e formato recusados", async () => {
   const photo = Buffer.concat([JPEG, Buffer.from("programacao")]);
   const first = await uploadFlowImage(owner(), { fileName: "programacao.jpg", data: photo });
