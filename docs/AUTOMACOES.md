@@ -123,6 +123,17 @@ aparece na Inbox. Mostra texto, imagem, menu (opções clicáveis), coleta,
 encaminhamento e conclusão, e avisa quando o fluxo mudou durante o teste. Sem o
 módulo Atendimento, mostra a mensagem de indisponibilidade, como na execução.
 
+A prévia **não consulta o estado** da automação: pausada, ela continua podendo
+ser testada (é o motor em memória). A pausa real vale só na operação, aplicada
+no banco (`flow_paused`, 0010). Por isso o editor mostra, enquanto pausada, um
+aviso fixo ("pausada, mas pode continuar sendo testada, sem enviar mensagens
+reais") e o painel da prévia repete o aviso. O indicador de entrada só diz
+"Responde às conversas novas" quando ativa; pausada, "Pausada: não responde…";
+ainda não publicada, "Responderá… ao publicar" (`entryIndicator`).
+
+Layout: a partir de 1400 px a prévia fica num painel ao lado e a página reserva o
+espaço; abaixo disso ocupa a tela toda (✕ fecha).
+
 ### Publicação, histórico e restauração
 
 Publicar exige rascunho salvo e sem erros e confirma com um resumo (etapas,
@@ -317,6 +328,11 @@ Do editor (E3B):
   limpar órfãs exige rotina própria.
 - Envio de imagem enviada pelo painel pela Cloud API depende da E2C (upload na
   Meta); hoje só o canal de desenvolvimento a "envia".
+- A publicação não confere que o `mediaId` de uma imagem pertence à organização
+  do fluxo (um POST manual poderia gravar o id de outra). Não vaza nada — a rota
+  e a RLS só entregam imagens da própria organização, e o id é um uuid aleatório —,
+  mas a E2C deve ler a imagem escopada pela organização ao enviá-la à Meta e
+  tratar a ausência como falha de envio.
 - Sem edição simultânea: conflito é detectado e recusado, não mesclado.
 - Tipos de pergunta são só texto livre com tamanho (o que o motor suporta);
   data, número e opções fechadas ficam para depois.
