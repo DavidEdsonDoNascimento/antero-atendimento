@@ -64,8 +64,8 @@ pnpm auth:provision dev --email voce@exemplo.local --name "Seu Nome"
 
 Para vinculá-la a uma organização e (opcional) torná-la administradora da
 plataforma — operação administrativa feita direto no banco, como dono das
-tabelas (a aplicação não tem permissão de escrita em vínculos nem em organizações
-desde a 0012). O banco não deixa uma organização ficar sem owner ativo: para trocar
+tabelas (a aplicação não tem permissão de escrita em vínculos nem em organizações,
+nem para renomear, desde a 0012). O banco não deixa uma organização ficar sem owner ativo: para trocar
 o owner, torne o novo owner ativo antes de alterar o antigo (`docs/DATABASE.md`).
 
 ```bash

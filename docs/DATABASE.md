@@ -36,10 +36,14 @@ acessar o schema `auth`.
 
 ### organizations
 `name`, `slug` (único), `status` (`active`/`inactive`). `inactive` significa
-**suspensa** (ver "Suspensão de organizações"). Pela aplicação, só `name` é
-editável; `status` muda apenas por `set_organization_status`. Desde a G2A (0012)
-a aplicação não cria nem exclui organizações: isso é operação administrativa
-fora de `antero_app` (como dono das tabelas, `docs/SETUP.md`).
+**suspensa** (ver "Suspensão de organizações"). **Somente leitura para a
+aplicação desde a G2A (0012):** `antero_app` não cria, não exclui nem renomeia
+organizações (sem INSERT, DELETE nem `UPDATE (name)`, e sem as políticas de
+escrita). `status` muda apenas por `set_organization_status` e os módulos por
+`set_organization_module`, funções do admin da plataforma. Criar, excluir e
+renomear são hoje operação administrativa fora de `antero_app` (como dono das
+tabelas, `docs/SETUP.md`); quando fizerem parte da aplicação, serão operações
+controladas e auditáveis, por função, nunca escrita direta.
 
 ### organization_members
 Vínculo usuário↔organização com `role` (`owner`/`admin`/`attendant`) e `status`
@@ -237,7 +241,7 @@ totalmente qualificadas.
 | Tabela | SELECT | INSERT | UPDATE | DELETE |
 |--------|--------|--------|--------|--------|
 | profiles | próprio, colega de org, admin plataforma | (gatilho) | próprio | — |
-| organizations | membro, admin plataforma | — (0012) | admin da org, admin plataforma (só `name`) | — (0012) |
+| organizations | membro, admin plataforma | — (0012) | — (0012; status por `set_organization_status`) | — (0012) |
 | organization_members | membro, admin plataforma | — (0012) | — (0012) | — (0012) |
 | whatsapp_accounts | membro, admin plataforma | — | — | — |
 | organization_modules | membro, admin plataforma | — | — | — |
@@ -350,7 +354,7 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0009_automation_enums` | `message_type` `image`/`interactive`; eventos `automation_started`/`handed_off` | 0008 |
 | `0010_automations` | fluxos, versões imutáveis, sessões, execuções, `messages.payload`/`automation_execution_id`, funções de configuração e execução, RLS | 0009 |
 | `0011_automation_media` | imagens dos fluxos no PostgreSQL, `save_automation_media` | 0010 |
-| `0012_member_rules` | sem escrita direta de `antero_app` em `organization_members` e sem INSERT/DELETE em `organizations` (privilégios e políticas); gatilho de owner ativo | 0001–0011 |
+| `0012_member_rules` | sem escrita direta de `antero_app` em `organization_members` e em `organizations` (INSERT, UPDATE (name), DELETE; privilégios e políticas); gatilho de owner ativo | 0001–0011 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
