@@ -528,8 +528,14 @@ senão `"invalid"`) e SQLSTATE quando aplicável. Sem e-mail, mensagem do banco 
 e as duas Server Actions administrativas.
 
 **Retenção e leitura.** Sem expurgo; revisar em até 24 meses. Índices `(organization_id, occurred_at
-desc, id desc)` e `(occurred_at desc, id desc)` para consulta por organização e período. A tela de
-atividade é a G2C (ainda não existe).
+desc, id desc)` e `(occurred_at desc, id desc)` para consulta por organização e período. A leitura pela
+aplicação é a G2C (`modules/audit/sql-queries.ts#listAuditEvents`, telas em `docs/ADMIN-PLATAFORMA.md`): pool
+`antero_app`, `is_platform_admin()` na transação, keyset `(occurred_at, id)` sobre esses índices (medido no
+banco de testes com 50 mil eventos: Index Scan, ~1 ms), limites de período convertidos no PostgreSQL
+(`'AAAA-MM-DD'::date::timestamp AT TIME ZONE 'America/Sao_Paulo'`), nomes de autor e organização por LEFT
+JOIN na leitura e só `module`/`from`/`to` de `details`. Entre organizações, uma transação que confirma depois
+pode gravar um evento com instante anterior ao limite de uma página já lida: quem está nas páginas antigas só
+o vê ao voltar aos mais recentes (a ordem continua determinística, sem duplicar).
 
 **G3.** `action` e `actor_kind` são `text` com CHECK (ampliáveis sem migration de enum);
 `record_audit_event` serve a eventos que não são mudança de linha (início/fim de suporte); a coluna de
