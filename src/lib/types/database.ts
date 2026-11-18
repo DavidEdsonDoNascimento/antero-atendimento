@@ -25,6 +25,9 @@ export type MessageDeliveryStatus =
 export type ConversationEventType = "assigned" | "resolved" | "reopened" | "automation_started" | "handed_off";
 export type AutomationFlowStatus = "draft" | "active" | "paused";
 export type AutomationSessionStatus = "active" | "handed_off" | "completed" | "interrupted" | "failed";
+/** `audit_events.action` e `actor_kind` (0013): text + CHECK, ampliáveis. A leitura aceita valores desconhecidos. */
+export type AuditAction = "organization.suspended" | "organization.reactivated" | "module.enabled" | "module.disabled";
+export type AuditActorKind = "platform_admin" | "maintenance";
 
 export type Organization = {
   id: string;

@@ -15,7 +15,7 @@ import { after, before, test } from "node:test";
 import type pg from "pg";
 
 import { createLocalProvisioner } from "../../src/lib/identity/provision.ts";
-import { connectFixtureClient } from "../db/harness.ts";
+import { connectFixtureClient, createExtraUsers } from "../db/harness.ts";
 import { createTestIdentity, deleteMail, mailCount, uniqueIp, waitForMail, type TestIdentity } from "../db/identity-harness.ts";
 import { createInboxFixtures, dropInboxFixtures, type InboxFixtures } from "../db/inbox-fixtures.ts";
 
@@ -933,5 +933,256 @@ test("auditoria: suspender, reativar e módulos pela central geram os eventos, c
   } finally {
     await setStatus(f!.orgC, "active");
     await setModules(f!.orgC, ["atendimento"]);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// G2C — histórico de atividades administrativas
+// ---------------------------------------------------------------------------
+
+const activitiesOf = (organizationId: string) => `/admin/organizacoes/${organizationId}/atividades`;
+/** HTML sem os comentários que o React usa para separar trechos de texto. */
+const text = (html: string) => html.replaceAll("<!-- -->", "");
+/** Só a lista de eventos (o `<ol>` do histórico), ou "" se não houver. */
+const eventList = (html: string) => /<ol aria-label="Atividades administrativas"[\s\S]*?<\/ol>/.exec(text(html))?.[0] ?? "";
+const eventCount = (html: string) => (eventList(html).match(/<li /g) ?? []).length;
+/** Ids dos eventos exibidos (`Registro #id`), na ordem da tela. */
+const eventIds = (html: string) => [...eventList(html).matchAll(/Registro #(\d+)/g)].map((match) => match[1]);
+/** Ids dos eventos da organização, na ordem esperada, pelo dono das tabelas. */
+const auditIdsOf = async (organizationId: string) =>
+  (await fixture.query("SELECT id::text FROM public.audit_events WHERE organization_id = $1 ORDER BY occurred_at DESC, id DESC", [organizationId])).rows.map(
+    (row) => row.id as string,
+  );
+const mainOf = (html: string) => /<main[\s\S]*<\/main>/.exec(html)?.[0] ?? "";
+const hrefOf = (html: string, label: string) =>
+  new RegExp(`href="([^"]+)"[^>]*>${label}`).exec(text(html))?.[1]?.replaceAll("&amp;", "&") ?? null;
+
+async function createOrganization(name: string): Promise<string> {
+  const slug = `${name.toLowerCase().replace(/[^a-z]+/g, "-")}-${f!.suffix}`;
+  return (await fixture.query("INSERT INTO public.organizations (name, slug) VALUES ($1, $2) RETURNING id", [name, slug])).rows[0].id;
+}
+
+/** Evento sintético com instante escolhido (o dono das tabelas pode gravar; a aplicação não). */
+async function insertAuditEvent(organizationId: string, occurredAt: string, action: string, details: object, actor: string | null) {
+  await fixture.query(
+    `INSERT INTO public.audit_events (organization_id, actor_user_id, actor_kind, action, details, occurred_at)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::timestamptz)`,
+    [organizationId, actor, actor ? "platform_admin" : "maintenance", action, JSON.stringify(details), occurredAt],
+  );
+}
+
+test("atividades: da central ao histórico da organização e à visão global; as quatro operações em português", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const adminName = (await fixture.query("SELECT full_name FROM public.profiles WHERE id = $1", [f!.more.platformAdmin])).rows[0].full_name;
+
+  const central = await platformAdmin.page("/admin");
+  assert.equal(hrefOf(central.html, "Atividades administrativas"), "/admin/atividades");
+  const detail = await platformAdmin.page(`/admin/organizacoes/${f!.orgC}`);
+  assert.equal(hrefOf(detail.html, "Ver histórico"), activitiesOf(f!.orgC));
+  assert.match(text(detail.html), /Atividades administrativas/);
+  assert.equal(eventCount(detail.html), 0, "o detalhe não carrega eventos");
+
+  const statusId = statusActionIdOf(detail.html)!;
+  const moduleId = moduleActionIdOf(detail.html)!;
+  try {
+    assert.match((await postStatusAction(platformAdmin, statusId, f!.orgC, "inactive")).text, /Organização suspensa\./);
+    assert.match((await postStatusAction(platformAdmin, statusId, f!.orgC, "active")).text, /Organização reativada\./);
+    assert.match((await postModuleAction(platformAdmin, moduleId, { organizationId: f!.orgC, module: "contatos", enabled: "true" })).text, /Contatos habilitado/);
+    assert.match((await postModuleAction(platformAdmin, moduleId, { organizationId: f!.orgC, module: "contatos", enabled: "false" })).text, /Contatos desabilitado/);
+    // Manutenção por SQL do operador, depois das quatro.
+    await setStatus(f!.orgC, "inactive");
+    await setStatus(f!.orgC, "active");
+
+    const page = await platformAdmin.page(activitiesOf(f!.orgC));
+    assert.equal(page.status, 200);
+    const html = text(page.html);
+    assert.match(html, /Horários de Brasília/);
+    assert.equal(hrefOf(page.html, "← Voltar a Org C Vazia"), `/admin/organizacoes/${f!.orgC}`);
+    const list = eventList(page.html);
+    assert.deepEqual(eventIds(page.html), (await auditIdsOf(f!.orgC)).slice(0, 25), "só eventos de C, na ordem do banco");
+    // Mais recentes primeiro: manutenção (reativou, suspendeu) e depois as quatro do admin, da última à primeira.
+    const titles = [...list.matchAll(/<p class="text-sm font-medium text-foreground">([^<]+)/g)].map((match) => match[1]);
+    assert.deepEqual(titles.slice(0, 6), [
+      "Organização reativada",
+      "Organização suspensa",
+      "Módulo desabilitado",
+      "Módulo habilitado",
+      "Organização reativada",
+      "Organização suspensa",
+    ]);
+    for (const piece of [" · Contatos", "Ativa → Suspensa", "Suspensa → Ativa", "Desabilitado → Habilitado", "Habilitado → Desabilitado", "Administrador da plataforma", "Manutenção — alteração direta no banco", adminName]) {
+      assert.ok(list.includes(piece), piece);
+    }
+    assert.match(list, /<time dateTime="\d{4}-\d{2}-\d{2}T[^"]+">\d{2}\/\d{2}\/\d{4}, \d{2}:\d{2}:\d{2}<\/time>/);
+
+    const global = await platformAdmin.page("/admin/atividades");
+    assert.equal(global.status, 200);
+    assert.match(text(global.html), /Todas as organizações · Horários de Brasília/);
+    assert.equal(hrefOf(global.html, "← Voltar às organizações"), "/admin");
+    assert.ok(eventList(global.html).includes(`href="/admin/organizacoes/${f!.orgC}"`), "global com link para a organização");
+    assert.match(global.html, new RegExp(`<option value="${f!.orgC}">Org C Vazia</option>`));
+    assert.equal(eventCount(global.html), 25, "primeira página da global");
+  } finally {
+    await setStatus(f!.orgC, "active");
+    await setModules(f!.orgC, ["atendimento"]);
+  }
+});
+
+test("atividades: filtros, período pelos dias de Brasília, período inválido e paginação de 25 com os filtros mantidos", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const orgP = await createOrganization("Org Paginação");
+  const orgQ = await createOrganization("Org Sem Histórico");
+  try {
+    for (let i = 0; i < 30; i++) {
+      const minute = String(i).padStart(2, "0");
+      await insertAuditEvent(orgP, `2026-05-01 12:${minute}:00+00`, "module.enabled", { module: "contatos", from: false, to: true }, f!.more.platformAdmin);
+    }
+    // 02:59:59Z de 02/05 ainda é 01/05 em Brasília; 03:00Z já é 02/05.
+    await insertAuditEvent(orgP, "2026-05-02 02:59:59+00", "organization.suspended", { from: "active", to: "inactive" }, f!.more.platformAdmin);
+    await insertAuditEvent(orgP, "2026-05-02 03:00:00+00", "organization.suspended", { from: "active", to: "inactive" }, f!.more.platformAdmin);
+
+    const first = await platformAdmin.page(`${activitiesOf(orgP)}?tipo=module.enabled`);
+    assert.equal(first.status, 200);
+    assert.equal(eventCount(first.html), 25);
+    assert.doesNotMatch(text(first.html), /Voltar aos mais recentes/);
+    const older = hrefOf(first.html, "Eventos mais antigos →");
+    assert.ok(older?.startsWith(`${activitiesOf(orgP)}?tipo=module.enabled&antes=`), `mantém o filtro: ${older}`);
+    const second = await platformAdmin.page(older!);
+    assert.equal(eventCount(second.html), 5);
+    assert.equal(hrefOf(second.html, "← Voltar aos mais recentes"), `${activitiesOf(orgP)}?tipo=module.enabled`);
+    assert.equal(hrefOf(second.html, "Eventos mais antigos →"), null, "última página");
+    // O formulário não leva o cursor: mudar o filtro volta aos mais recentes.
+    assert.doesNotMatch(mainOf(second.html).split("<form")[1].split("</form>")[0], /name="antes"/);
+
+    const suspended = await platformAdmin.page(`${activitiesOf(orgP)}?tipo=organization.suspended`);
+    assert.equal(eventCount(suspended.html), 2);
+    assert.doesNotMatch(eventList(suspended.html), /Módulo habilitado/);
+    const day = await platformAdmin.page(`${activitiesOf(orgP)}?de=2026-05-02&ate=2026-05-02`);
+    assert.equal(eventCount(day.html), 1);
+    assert.match(eventList(day.html), /02\/05\/2026, 00:00:00/);
+    const previousDay = await platformAdmin.page(`${activitiesOf(orgP)}?tipo=organization.suspended&ate=2026-05-01`);
+    assert.equal(eventCount(previousDay.html), 1);
+    assert.match(eventList(previousDay.html), /01\/05\/2026, 23:59:59/);
+
+    // Período invertido: aviso, período ignorado, tipo mantido; datas reexibidas no formulário.
+    const reversed = await platformAdmin.page(`${activitiesOf(orgP)}?tipo=organization.suspended&de=2026-05-10&ate=2026-05-01`);
+    assert.equal(reversed.status, 200);
+    assert.match(text(reversed.html), /Período inválido/);
+    assert.equal(eventCount(reversed.html), 2);
+    assert.match(reversed.html, /name="de"[^>]*value="2026-05-10"|value="2026-05-10"[^>]*name="de"/);
+
+    // Valores lixo: nunca 500; cursor inválido volta aos mais recentes com aviso.
+    const overflow = Buffer.from('{"occurredAt":"2026-05-01T00:00:00Z","id":"9223372036854775808"}').toString("base64url");
+    for (const path of [
+      `${activitiesOf(orgP)}?tipo=lixo&de=xx&ate=2026-02-30&antes=lixo`,
+      `${activitiesOf(orgP)}?antes=${overflow}`,
+      `/admin/atividades?organizacao=nao-e-uuid&tipo=%27%20OR%201%3D1&antes=%00`,
+    ]) {
+      const page = await platformAdmin.page(path);
+      assert.equal(page.status, 200, path);
+      assert.match(text(page.html), /O endereço da página não é válido/, path);
+    }
+
+    // Estados vazios distintos.
+    assert.match(text((await platformAdmin.page(`${activitiesOf(orgP)}?tipo=organization.reactivated`)).html), /Nenhuma atividade com esses filtros[\s\S]*Limpar filtros/);
+    assert.match(text((await platformAdmin.page(activitiesOf(orgQ))).html), /Nenhuma atividade registrada/);
+    const pastEnd = Buffer.from('{"occurredAt":"2000-01-01T00:00:00Z","id":"1"}').toString("base64url");
+    assert.match(text((await platformAdmin.page(`${activitiesOf(orgQ)}?antes=${pastEnd}`)).html), /Não há eventos mais antigos[\s\S]*Voltar aos mais recentes/);
+
+    // Global filtrada pela organização: só P, com a mesma paginação.
+    const global = await platformAdmin.page(`/admin/atividades?organizacao=${orgP}&tipo=module.enabled`);
+    assert.equal(eventCount(global.html), 25);
+    assert.equal((eventList(global.html).match(/>Org Paginação<\/a>/g) ?? []).length, 25);
+    assert.ok(hrefOf(global.html, "Eventos mais antigos →")?.startsWith(`/admin/atividades?tipo=module.enabled&organizacao=${orgP}&antes=`));
+    assert.match(global.html, new RegExp(`<option value="${orgP}" selected="">Org Paginação</option>`));
+  } finally {
+    await fixture.query("DELETE FROM public.organizations WHERE id = ANY($1::uuid[])", [[orgP, orgQ]]);
+  }
+});
+
+test("atividades: organização excluída e autor removido continuam na visão global; nada interno no HTML; leitura não altera eventos", async () => {
+  const platformAdmin = await loggedIn("platformAdmin");
+  const removed = await createExtraUsers(f!.suffix, { authorGone: "Autora Removida E2E" });
+  const orgGone = await createOrganization("Org Excluída E2E");
+  await insertAuditEvent(orgGone, "2026-06-01 12:00:00+00", "module.enabled", { module: "automacoes", from: false, to: true }, removed.authorGone);
+  await setStatus(orgGone, "inactive");
+  await fixture.query("DELETE FROM auth.users WHERE id = $1", [removed.authorGone]);
+  await fixture.query("DELETE FROM public.organizations WHERE id = $1", [orgGone]);
+  const fingerprint = async () =>
+    (await fixture.query("SELECT count(*)::text || md5(string_agg(e::text, ',' ORDER BY e.id)) AS fp FROM public.audit_events e WHERE e.organization_id = ANY($1::uuid[])", [[orgGone, f!.orgC]])).rows[0].fp;
+  const before = await fingerprint();
+
+  const page = await platformAdmin.page(`/admin/atividades?organizacao=${orgGone}`);
+  assert.equal(page.status, 200);
+  const list = eventList(page.html);
+  assert.equal(eventCount(page.html), 2);
+  assert.ok(list.includes(`Organização excluída · ${orgGone.slice(0, 8)}`));
+  assert.doesNotMatch(list, /Org Excluída E2E/);
+  for (const piece of ["Usuário removido", "Manutenção — alteração direta no banco", "Módulo habilitado", " · Automações", "Ativa → Suspensa"]) {
+    assert.ok(list.includes(piece), piece);
+  }
+  assert.match(text(page.html), new RegExp(`<option value="${orgGone}" selected="">Organização excluída · ${orgGone.slice(0, 8)}</option>`));
+  // A rota da organização não existe mais para ela.
+  assert.equal((await platformAdmin.page(activitiesOf(orgGone))).status, 404);
+
+  // Nada interno: papel do banco, details, códigos crus, e-mails, Server Actions ou formulário POST na área principal.
+  for (const html of [page.html, (await platformAdmin.page(activitiesOf(f!.orgC))).html]) {
+    for (const internal of ["antero_migrator", "antero_owner", "antero_admin", "db_role", "details", "authorgone."]) {
+      assert.ok(!html.includes(internal), internal);
+    }
+    const events = eventList(html);
+    assert.ok(events.length > 0);
+    assert.doesNotMatch(events, /@|organization\.(suspended|reactivated)|module\.(enabled|disabled)|"from"|"to"/);
+    const main = mainOf(html);
+    assert.equal((main.match(/<form/g) ?? []).length, 1, "só o formulário de filtros");
+    assert.match(main, /<form[^>]*method="get"/);
+    assert.doesNotMatch(main, /\$ACTION_ID|method="post"/i);
+  }
+  assert.equal(await fingerprint(), before, "ler o histórico não altera eventos");
+});
+
+test("atividades: só o admin da plataforma; sem sessão vai ao login; ids inválidos e inexistentes 404; sem vazamento entre organizações", async () => {
+  const anonymous = new Client();
+  for (const path of ["/admin/atividades", activitiesOf(f!.orgA)]) {
+    const page = await anonymous.page(path);
+    assert.equal(page.status, 307, path);
+    assert.equal(page.redirect, "/login", path);
+  }
+  for (const who of ["aOwner", "aAttendant", "aDisabled", "bOwner", "nobody", "multi"] as const) {
+    const client = await loggedIn(who);
+    for (const path of ["/admin/atividades", activitiesOf(f!.orgA), `${activitiesOf(f!.orgB)}?tipo=module.enabled`]) {
+      const page = await client.page(path);
+      assert.equal(page.redirect, "/visao-geral", `${who} ${path}`);
+      assert.equal(eventCount(page.html), 0, `${who} ${path}`);
+    }
+  }
+
+  const platformAdmin = await loggedIn("platformAdmin");
+  for (const id of ["nao-e-uuid", "00000000-0000-4000-8000-000000000000", `${f!.orgA}x`]) {
+    assert.equal((await platformAdmin.page(activitiesOf(id))).status, 404, id);
+  }
+  try {
+    // Um evento em B; a página de A não o mostra, e a de B só tem B.
+    await setStatus(f!.orgB, "inactive");
+    await setStatus(f!.orgB, "active");
+    const ofA = await platformAdmin.page(activitiesOf(f!.orgA));
+    assert.equal(ofA.status, 200);
+    assert.doesNotMatch(text(ofA.html), /Org B Integração/);
+    // Exatamente os eventos de A (até 25), na ordem do banco; nenhum dos de B.
+    assert.deepEqual(eventIds(ofA.html), (await auditIdsOf(f!.orgA)).slice(0, 25));
+    const idsOfB = new Set(await auditIdsOf(f!.orgB));
+    assert.ok(idsOfB.size > 0);
+    assert.ok(eventIds(ofA.html).every((id) => !idsOfB.has(id)));
+    assert.doesNotMatch(eventList(ofA.html), /href="\/admin\/organizacoes\//, "sem coluna de organização na rota da organização");
+    const ofB = await platformAdmin.page(activitiesOf(f!.orgB));
+    assert.match(eventList(ofB.html), /Organização reativada/);
+    assert.deepEqual(eventIds(ofB.html), (await auditIdsOf(f!.orgB)).slice(0, 25));
+    // Na global, filtrada por A, nenhum evento de B.
+    const globalA = await platformAdmin.page(`/admin/atividades?organizacao=${f!.orgA}`);
+    assert.ok(eventCount(globalA.html) > 0);
+    assert.deepEqual(eventIds(globalA.html), (await auditIdsOf(f!.orgA)).slice(0, 25));
+    assert.doesNotMatch(eventList(globalA.html), new RegExp(f!.orgB));
+  } finally {
+    await setStatus(f!.orgB, "active");
   }
 });
