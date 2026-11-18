@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { z } from "zod";
 
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requirePlatformAdmin } from "@/lib/auth/dal";
@@ -91,6 +92,23 @@ export default async function OrganizationPage({ params }: OrganizationPageProps
           A alteração vale na requisição seguinte de cada usuário da organização. Desabilitar um módulo não apaga dados.
         </p>
       </section>
+
+      <Card>
+        <CardContent className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+          <div className="space-y-1">
+            <h2 className="text-sm font-semibold text-foreground">Atividades administrativas</h2>
+            <p className="text-muted">
+              Suspensões, reativações e alterações de módulos desta organização, com responsável e horário.
+            </p>
+          </div>
+          <Link
+            href={`/admin/organizacoes/${organization.id}/atividades`}
+            className={buttonVariants({ variant: "secondary", size: "sm", className: "shrink-0" })}
+          >
+            Ver histórico
+          </Link>
+        </CardContent>
+      </Card>
 
       <OrganizationTeam members={details.members} />
       <OrganizationChannels channels={details.channels} />
