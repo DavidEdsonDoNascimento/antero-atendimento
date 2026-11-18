@@ -1,5 +1,7 @@
 import type { BadgeTone } from "@/components/ui/badge";
 import type {
+  AuditAction,
+  AuditActorKind,
   AutomationFlowStatus,
   AutomationSessionStatus,
   ConversationEventType,
@@ -158,4 +160,23 @@ export const automationEndReasonLabel: Record<string, string> = {
   human_takeover: "atendente assumiu",
   module_disabled: "módulo Automações desligado",
   flow_paused: "fluxo pausado",
+};
+
+/** Operações da auditoria administrativa (`audit_events.action`). */
+export const auditActionLabel: Record<AuditAction, string> = {
+  "organization.suspended": "Organização suspensa",
+  "organization.reactivated": "Organização reativada",
+  "module.enabled": "Módulo habilitado",
+  "module.disabled": "Módulo desabilitado",
+};
+
+/** Tipo de responsável de um evento de auditoria (`audit_events.actor_kind`). */
+export const auditActorKindLabel: Record<AuditActorKind, string> = {
+  platform_admin: "Administrador da plataforma",
+  maintenance: "Manutenção",
+};
+
+export const auditActorKindTone: Record<AuditActorKind, BadgeTone> = {
+  platform_admin: "blue",
+  maintenance: "amber",
 };
