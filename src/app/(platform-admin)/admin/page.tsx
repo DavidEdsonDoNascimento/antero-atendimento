@@ -57,6 +57,11 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
       <PageHeader
         title="Organizações"
         description="Administração interna da Antero: clientes, situação e módulos contratados. Abra uma organização para ver a equipe e o canal."
+        actions={
+          <Link href="/admin/atividades" className={buttonVariants({ variant: "secondary", size: "sm" })}>
+            Atividades administrativas
+          </Link>
+        }
       />
 
       <OrganizationFilters search={search} status={status} />
