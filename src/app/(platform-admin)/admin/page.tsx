@@ -19,16 +19,13 @@ import {
 
 import { OrganizationFilters } from "./_components/organization-filters";
 import { OrganizationStatusForm } from "./_components/organization-status-form";
+import { formatDate } from "./_lib/format";
 
 export const metadata: Metadata = { title: "Admin da plataforma" };
 
 type AdminPageProps = {
   searchParams: Promise<{ busca?: string | string[]; situacao?: string | string[] }>;
 };
-
-const dateFormatter = new Intl.DateTimeFormat("pt-BR", {
-  dateStyle: "medium",
-});
 
 function EnabledModules({ modules }: { modules: EnabledModuleRow[] }) {
   if (modules.length === 0) return <span className="text-muted-2">Nenhum</span>;
@@ -117,7 +114,7 @@ export default async function AdminPage({ searchParams }: AdminPageProps) {
                       />
                     </td>
                     <td className="px-5 py-3 text-muted">
-                      {dateFormatter.format(new Date(org.created_at))}
+                      {formatDate(org.created_at)}
                     </td>
                     <td className="space-y-2 px-5 py-3">
                       <Link
