@@ -98,8 +98,8 @@ const ROLE_CHECK_SQL = `
   FROM pg_catalog.pg_roles r
   WHERE r.rolname = current_user`;
 
-async function verifyAppRole(client: pg.ClientBase): Promise<void> {
-  const { rows } = await client.query(ROLE_CHECK_SQL, [APP_DATABASE_ROLE]);
+async function verifyRole(client: pg.ClientBase, expectedRole: string): Promise<void> {
+  const { rows } = await client.query(ROLE_CHECK_SQL, [expectedRole]);
   const role = rows[0];
   const safe =
     role?.is_app_role === true &&
@@ -111,14 +111,21 @@ async function verifyAppRole(client: pg.ClientBase): Promise<void> {
     !role.has_memberships;
   if (!safe) {
     throw new DatabaseConfigError(
-      `A conexão do banco precisa usar o papel ${APP_DATABASE_ROLE} sem superusuário, BYPASSRLS, ` +
+      `A conexão do banco precisa usar o papel ${expectedRole} sem superusuário, BYPASSRLS, ` +
         "CREATEROLE/CREATEDB/REPLICATION nem papéis herdados. Uso do banco bloqueado.",
     );
   }
 }
 
-function createState(): PoolState {
-  const config = parseAppDatabaseConfig(process.env);
+/**
+ * Pool com as proteções acima, para um papel: cada conexão nova confere o
+ * papel antes do primeiro uso. Usado pelo pool da aplicação e pelo do worker
+ * (`worker-pool.ts`). Interno de src/lib/db.
+ */
+export function createVerifiedPool(
+  config: AppDatabaseConfig,
+  { role, applicationName, label }: { role: string; applicationName: string; label: string },
+): pg.Pool {
   const pool = new pg.Pool({
     connectionString: config.connectionString,
     max: config.poolMax,
@@ -126,21 +133,27 @@ function createState(): PoolState {
     idleTimeoutMillis: config.idleTimeoutMs,
     statement_timeout: config.statementTimeoutMs,
     idle_in_transaction_session_timeout: config.idleInTransactionTimeoutMs,
-    application_name: "antero-atendimentos",
+    application_name: applicationName,
     // Sessão determinística: a saída textual de timestamps (que os parsers
     // acima convertem) depende de DateStyle e TimeZone.
     options: "-c TimeZone=UTC -c DateStyle=ISO,MDY",
     types: appTypeParsers,
     verify: (client, done) => {
-      verifyAppRole(client).then(() => done(), (error: Error) => done(error));
+      verifyRole(client, role).then(() => done(), (error: Error) => done(error));
     },
   });
   // Sem este handler, um erro numa conexão OCIOSA (ex.: servidor reiniciado)
   // derruba o processo. O pool já descarta a conexão; só registramos —
   // código e mensagem do PostgreSQL, nunca a configuração/credencial.
   pool.on("error", (error) => {
-    console.error(`[db] conexão ociosa descartada: ${describeError(error)}`);
+    console.error(`[${label}] conexão ociosa descartada: ${describeError(error)}`);
   });
+  return pool;
+}
+
+function createState(): PoolState {
+  const config = parseAppDatabaseConfig(process.env);
+  const pool = createVerifiedPool(config, { role: APP_DATABASE_ROLE, applicationName: "antero-atendimentos", label: "db" });
   return { pool, config };
 }
 
