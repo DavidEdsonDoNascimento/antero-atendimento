@@ -393,6 +393,9 @@ const commands = {
     }
     const env = {
       APP_DATABASE_URL: targetUrl(cfg, "dev", "antero_app"),
+      // Webhook (E2B-1). O papel precisa existir no banco (`pnpm db:roles`); os
+      // segredos da Meta (WHATSAPP_*) não são gerados aqui.
+      WORKER_DATABASE_URL: targetUrl(cfg, "dev", "antero_worker"),
       ...localIdentityEnv(cfg, "dev", "http://127.0.0.1:3000"),
     };
     const lines = [

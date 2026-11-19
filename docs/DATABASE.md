@@ -544,7 +544,17 @@ sessão de suporte entra na G3, nula.
 **Rollback.** O `down` da 0013 **recusa** se houver qualquer evento (não apaga histórico); só reverte em
 banco sem eventos e restaura `set_organization_status` da 0006. Recuperação: backup antes de aplicar.
 
-### Entrada de sistema (webhook/worker) — desenho futuro
+### Entrada de sistema (webhook/worker)
+
+**E2B-1 (0014), já implementado:** papel `antero_worker` (LOGIN, sem BYPASSRLS,
+nenhum privilégio de tabela) e as funções `webhook_record_delivery`,
+`webhook_claim_events` e `webhook_finish_event`. O webhook grava em
+`webhook_events` a notificação autenticada, com a organização derivada **só** do
+canal `cloud_api` registrado (Phone Number ID único + WABA conferida). Regras,
+estados e provisionamento: `docs/WHATSAPP.md`. Os itens 2 e 3 abaixo (ingestão
+pelo worker) são a E2B-2.
+
+Desenho original (mantido como referência):
 
 `ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo
 (é o que o simulador de desenvolvimento usa). A ingestão real da Meta **não**
