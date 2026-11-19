@@ -178,13 +178,16 @@ networks:
   backend:
     name: antero-atendimentos-homolog-backend
     internal: true
-  # Traefik ↔ aplicação. IP do Traefik fixo para AUTH_TRUSTED_PROXIES.
+  # Traefik ↔ aplicação. IP do Traefik fixo para AUTH_TRUSTED_PROXIES; os
+  # endereços dinâmicos (aplicação) saem de outra faixa, senão quem sobe
+  # primeiro pode ocupar o do Traefik.
   edge:
     name: antero-atendimentos-homolog-edge
     internal: true
     ipam:
       config:
         - subnet: 172.29.90.0/24
+          ip_range: 172.29.90.128/25
   # Só para publicar portas em 127.0.0.1 (banco, UI do Mailpit, Traefik, app-e2e).
   hostpub:
     name: antero-atendimentos-homolog-hostpub
