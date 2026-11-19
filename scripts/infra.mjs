@@ -41,10 +41,12 @@ const PASSWORD_KEYS = [
   "DEV_MIGRATOR_PASSWORD",
   "DEV_APP_PASSWORD",
   "DEV_AUTH_PASSWORD",
+  "DEV_WORKER_PASSWORD",
   "TEST_ADMIN_PASSWORD",
   "TEST_MIGRATOR_PASSWORD",
   "TEST_APP_PASSWORD",
   "TEST_AUTH_PASSWORD",
+  "TEST_WORKER_PASSWORD",
 ];
 const REQUIRED_KEYS = [
   "DEV_DB_PORT",
@@ -149,7 +151,7 @@ function nodeChildEnv(cfg, extra) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (
-      /^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|DB_TEST_|AUTH_SCHEMA_|BETTER_AUTH_|AUTH_TRUSTED_|SMTP_|MAIL_)/.test(key) ||
+      /^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|WORKER_DATABASE_|WHATSAPP_|DB_TEST_|AUTH_SCHEMA_|BETTER_AUTH_|AUTH_TRUSTED_|SMTP_|MAIL_)/.test(key) ||
       key === "DATABASE_URL" ||
       key in cfg
     ) {
@@ -167,7 +169,7 @@ function testUrl(cfg, role, password) {
 /** URL local do alvo (`dev`/`test`) para um papel; a senha vem de .env.infra. */
 function targetUrl(cfg, target, role) {
   const prefix = target === "dev" ? "DEV" : "TEST";
-  const key = { antero_app: "APP", antero_auth: "AUTH", antero_migrator: "MIGRATOR" }[role];
+  const key = { antero_app: "APP", antero_auth: "AUTH", antero_migrator: "MIGRATOR", antero_worker: "WORKER" }[role];
   return `postgres://${role}:${cfg[`${prefix}_${key}_PASSWORD`]}@127.0.0.1:${cfg[`${prefix}_DB_PORT`]}/${cfg[`${prefix}_DB_NAME`]}`;
 }
 
@@ -454,14 +456,29 @@ const commands = {
 
   // Cria papéis novos e ressincroniza atributos/senhas num banco JÁ
   // inicializado, rodando o mesmo script idempotente do initdb. Não toca em
-  // dados. O container precisa ter sido (re)criado com as variáveis atuais
-  // (`pnpm infra:up` / `pnpm db:test:up` recriam quando o compose muda).
+  // dados. As senhas vêm de .env.infra AGORA (não do ambiente com que o
+  // container foi criado): `-e NOME`, sem valor, faz o Compose ler o valor do
+  // próprio ambiente (childEnv), então nenhuma senha aparece na linha de
+  // comando, e um container criado antes de um papel novo (ex.: antero_worker,
+  // E2B-1) não precisa ser recriado nem reiniciado.
   roles([target]) {
     targetOf(target);
     const cfg = loadConfig();
     const service = target === "dev" ? "postgres-dev" : "postgres-test";
     const profiles = target === "test" ? ["test"] : [];
-    run(cfg, ["exec", "-T", service, "bash", "/docker-entrypoint-initdb.d/10-roles.sh"], { profiles });
+    const prefix = target === "dev" ? "DEV" : "TEST";
+    const passwords = {
+      ANTERO_MIGRATOR_PASSWORD: cfg[`${prefix}_MIGRATOR_PASSWORD`],
+      ANTERO_APP_PASSWORD: cfg[`${prefix}_APP_PASSWORD`],
+      ANTERO_AUTH_PASSWORD: cfg[`${prefix}_AUTH_PASSWORD`],
+      ANTERO_WORKER_PASSWORD: cfg[`${prefix}_WORKER_PASSWORD`],
+    };
+    const result = compose(
+      { ...cfg, ...passwords },
+      ["exec", "-T", ...Object.keys(passwords).flatMap((name) => ["-e", name]), service, "bash", "/docker-entrypoint-initdb.d/10-roles.sh"],
+      { profiles },
+    );
+    if (result.status !== 0) process.exit(result.status ?? 1);
     console.log(`[infra] papéis sincronizados no banco ${target}.`);
   },
 
@@ -735,11 +752,11 @@ const commands = {
 
     const roles = query(
       "select rolname, rolsuper, rolbypassrls, rolcreaterole, rolcreatedb, rolreplication, rolcanlogin " +
-        "from pg_roles where rolname in ('antero_owner','antero_migrator','antero_app','antero_auth') order by 1",
+        "from pg_roles where rolname in ('antero_owner','antero_migrator','antero_app','antero_auth','antero_worker') order by 1",
     );
     check(
-      "papéis antero_owner, antero_migrator, antero_app e antero_auth existem",
-      roles.ok && roles.out.split("\n").length === 4,
+      "papéis antero_owner, antero_migrator, antero_app, antero_auth e antero_worker existem",
+      roles.ok && roles.out.split("\n").length === 5,
       "rode `pnpm db:roles` (dev) ou `pnpm db:test:roles` (teste)",
     );
     const flags = Object.fromEntries(roles.out.split("\n").filter(Boolean).map((l) => {
@@ -747,14 +764,14 @@ const commands = {
       return [name, rest];
     }));
     // ordem: super, bypassrls, createrole, createdb, replication, canlogin
-    for (const role of ["antero_owner", "antero_migrator", "antero_app", "antero_auth"]) {
+    for (const role of ["antero_owner", "antero_migrator", "antero_app", "antero_auth", "antero_worker"]) {
       const f = flags[role] ?? [];
       check(`${role}: sem superusuário/BYPASSRLS/CREATEROLE/CREATEDB/REPLICATION`, f.slice(0, 5).every((v) => v === "f") && f.length === 6);
     }
     check("antero_owner não faz login", (flags.antero_owner ?? [])[5] === "f");
     check(
-      "antero_app, antero_auth e antero_migrator fazem login",
-      ["antero_app", "antero_auth", "antero_migrator"].every((r) => (flags[r] ?? [])[5] === "t"),
+      "antero_app, antero_auth, antero_worker e antero_migrator fazem login",
+      ["antero_app", "antero_auth", "antero_worker", "antero_migrator"].every((r) => (flags[r] ?? [])[5] === "t"),
     );
 
     const owners = query(
@@ -764,9 +781,9 @@ const commands = {
     check("banco e schema public pertencem a antero_owner", owners.ok && owners.out === "antero_owner|antero_owner");
 
     const owned = query(
-      "select count(*) from pg_class c join pg_roles r on r.oid = c.relowner where r.rolname in ('antero_app','antero_auth')",
+      "select count(*) from pg_class c join pg_roles r on r.oid = c.relowner where r.rolname in ('antero_app','antero_auth','antero_worker')",
     );
-    check("antero_app e antero_auth não possuem nenhum objeto", owned.ok && owned.out === "0");
+    check("antero_app, antero_auth e antero_worker não possuem nenhum objeto", owned.ok && owned.out === "0");
 
     const privs = query(
       "select has_schema_privilege('antero_app','public','CREATE'), " +
@@ -781,6 +798,18 @@ const commands = {
         `has_database_privilege('antero_auth','${dbName}','CREATE'), has_database_privilege('antero_auth','${dbName}','TEMP')`,
     );
     check("antero_auth sem USAGE/CREATE em public e sem CREATE/TEMP no banco", authPrivs.ok && authPrivs.out === "f|f|f|f");
+
+    const workerPrivs = query(
+      "select has_schema_privilege('antero_worker','public','USAGE'), has_schema_privilege('antero_worker','public','CREATE'), " +
+        `has_database_privilege('antero_worker','${dbName}','CREATE'), has_database_privilege('antero_worker','${dbName}','TEMP'), ` +
+        "(select count(*) from information_schema.role_table_grants where grantee = 'antero_worker'), " +
+        "(select count(*) from pg_auth_members m join pg_roles r on r.oid = m.member where r.rolname = 'antero_worker')",
+    );
+    check(
+      "antero_worker: USAGE em public, sem CREATE/TEMP, nenhum privilégio de tabela e nenhum papel herdado",
+      workerPrivs.ok && workerPrivs.out === "t|f|f|f|0|0",
+      workerPrivs.out,
+    );
 
     const app = query("select current_user, session_user, current_setting('is_superuser')", {
       user: "antero_app",
@@ -822,6 +851,19 @@ const commands = {
     } else {
       console.log("  --   schema auth ainda não existe (migrations pendentes)");
     }
+
+    const workerPassword = cfg[`${prefix}_WORKER_PASSWORD`];
+    const workerLogin = query("select current_user, session_user, current_setting('is_superuser')", {
+      user: "antero_worker",
+      password: workerPassword,
+    });
+    check("antero_worker conecta por TCP e não é superusuário", workerLogin.ok && workerLogin.out === "antero_worker|antero_worker|off", workerLogin.err);
+    const workerRead = query("select count(*) from public.organizations", { user: "antero_worker", password: workerPassword });
+    check(
+      "antero_worker NÃO lê tabelas de negócio (public.organizations)",
+      !workerRead.ok && /permission denied|does not exist/.test(workerRead.err),
+      workerRead.err || workerRead.out,
+    );
 
     const migrator = query("select current_user, session_user, current_setting('is_superuser')", {
       user: "antero_migrator",
