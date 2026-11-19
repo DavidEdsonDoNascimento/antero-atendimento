@@ -154,11 +154,12 @@ create table public.webhook_events (
   constraint webhook_events_dedupe_key_length check (octet_length(dedupe_key) = 32),
   constraint webhook_events_organization_fkey
     foreign key (organization_id) references public.organizations (id) on delete cascade,
-  -- O canal não é removido enquanto houver evento dele (até a limpeza de 30 dias).
+  -- O canal não é removido enquanto houver evento dele (até a limpeza de 30
+  -- dias). NO ACTION (conferido no fim do comando), não RESTRICT: excluir a
+  -- organização inteira remove canais e eventos no mesmo comando (como 0010).
   constraint webhook_events_whatsapp_account_fkey
     foreign key (organization_id, whatsapp_account_id)
-    references public.whatsapp_accounts (organization_id, id)
-    on delete restrict,
+    references public.whatsapp_accounts (organization_id, id),
   constraint webhook_events_account_has_organization
     check (whatsapp_account_id is null or organization_id is not null),
   constraint webhook_events_pending_has_channel

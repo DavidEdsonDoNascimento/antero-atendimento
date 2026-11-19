@@ -11,7 +11,7 @@
 -- Concorrência (duas conexões): tests/db/whatsapp-webhook.test.ts.
 BEGIN;
 \ir lib/helpers.psql
-SELECT plan(101);
+SELECT plan(104);
 
 -- Estado limpo dentro desta transação (desfeito no ROLLBACK).
 DELETE FROM public.webhook_events;
@@ -396,6 +396,11 @@ SELECT throws_ok($$SELECT pg_temp.finish(1, gen_random_uuid(), 'rejected')$$, '2
 SELECT throws_ok($$SELECT pg_temp.finish(1, gen_random_uuid(), 'rejected', 'Texto Livre')$$, '22023', NULL, 'motivo fora do formato de código é recusado');
 SELECT throws_ok($$SELECT pg_temp.finish(-1, gen_random_uuid(), 'processed')$$, 'P0002', NULL, 'evento inexistente');
 SELECT throws_ok($$SELECT pg_temp.role_exec('antero_app', 'SELECT * FROM public.webhook_claim_events(10, 60)')$$, '42501', NULL, 'antero_app NÃO reivindica eventos');
+
+-- Exclusões: o canal com eventos fica; a organização inteira leva canais e eventos.
+SELECT throws_ok($$DELETE FROM public.whatsapp_accounts WHERE id = pg_temp.id('acc_a1')$$, '23503', NULL, 'canal com eventos não é removido');
+SELECT lives_ok($$DELETE FROM public.organizations WHERE id = pg_temp.id('org_b')$$, 'excluir a organização remove os canais e os eventos dela');
+SELECT is((SELECT count(*)::int FROM public.webhook_events WHERE waba_id = '25550002001' AND organization_id IS NOT NULL), 0, 'nenhum evento da organização excluída');
 
 SELECT * FROM finish();
 ROLLBACK;
