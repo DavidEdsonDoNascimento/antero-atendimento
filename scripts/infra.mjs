@@ -601,6 +601,29 @@ const commands = {
     if (result.status !== 0) process.exit(result.status ?? 1);
   },
 
+  // Cadastro controlado de canal WhatsApp Cloud API (E2B-1) no banco do alvo,
+  // como antero_migrator. Simula por padrão; `--apply` grava. Ver
+  // scripts/whatsapp-channel.mjs e docs/WHATSAPP.md.
+  //   pnpm whatsapp:channel test -- --organization <uuid> --phone-number-id <id> --waba-id <id> [--apply]
+  "whatsapp-channel"([target, ...args]) {
+    targetOf(target);
+    const cfg = loadConfig();
+    const result = spawnSync(
+      process.execPath,
+      ["--disable-warning=MODULE_TYPELESS_PACKAGE_JSON", join(ROOT, "scripts", "whatsapp-channel.mjs"), ...args.filter((arg) => arg !== "--")],
+      {
+        cwd: ROOT,
+        stdio: "inherit",
+        env: nodeChildEnv(cfg, {
+          WHATSAPP_CHANNEL_DATABASE_URL: targetUrl(cfg, target, "antero_migrator"),
+          WHATSAPP_CHANNEL_EXPECTED_DATABASE: target === "dev" ? cfg.DEV_DB_NAME : cfg.TEST_DB_NAME,
+        }),
+      },
+    );
+    if (result.error) fail(`não foi possível executar o cadastro: ${result.error.message}`);
+    if (result.status !== 0) process.exit(result.status ?? 1);
+  },
+
   // Testes ponta a ponta contra a aplicação isolada REAL (proxy, rota
   // /api/auth, DAL, páginas e consultas SQL) sobre o banco de TESTES:
   // sobe o servidor, roda tests/e2e/*.test.ts e o encerra.
