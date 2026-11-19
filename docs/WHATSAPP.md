@@ -115,6 +115,11 @@ na sua. Nada fora de `webhook_events` é alterado pelo registro.
   - não executa ingestão, administração nem automações.
 - O corpo bruto contém telefones, nomes e mensagens: fica só no banco, nunca no log.
   O log tem tipo, evento, id, instante, motivo, bytes, contagens e SQLSTATE.
+- O `hub.verify_token` chega na query string do GET de verificação. A aplicação não
+  registra URLs, mas o access log de um proxy registra (o Traefik da homologação
+  grava a URL inteira). Em produção: access log do proxy desligado ou sem a query,
+  e troque o token se ele tiver ido para um log. Ele só serve para a verificação;
+  forjar notificação exige o App Secret.
 - Nenhuma regra da G2A/G2B/G2C muda; `ingest_inbound_message` e `dev_automation_*`
   continuam exigindo usuário humano e canal `development`.
 
