@@ -275,9 +275,11 @@ function appChildEnv(cfg, extra) {
   return { ...env, ...extra, NEXT_TELEMETRY_DISABLED: "1" };
 }
 
-function appServerEnv(cfg, target, port) {
+function appServerEnv(cfg, target, port, extra = {}) {
   return appChildEnv(cfg, {
     APP_DATABASE_URL: targetUrl(cfg, target, "antero_app"),
+    WORKER_DATABASE_URL: targetUrl(cfg, target, "antero_worker"),
+    ...extra,
     ...localIdentityEnv(cfg, target, `http://127.0.0.1:${port}`),
   });
 }
@@ -557,6 +559,7 @@ const commands = {
           ...localIdentityEnv(cfg, "test"),
           DB_TEST_MAILPIT_URL: `http://127.0.0.1:${cfg.MAILPIT_UI_PORT}`,
           APP_DATABASE_URL: testUrl(cfg, "antero_app", cfg.TEST_APP_PASSWORD),
+          WORKER_DATABASE_URL: testUrl(cfg, "antero_worker", cfg.TEST_WORKER_PASSWORD),
           DB_TEST_FIXTURE_URL: testUrl(cfg, "antero_migrator", cfg.TEST_MIGRATOR_PASSWORD),
           DB_TEST_AUTH_URL: testUrl(cfg, "antero_auth", cfg.TEST_AUTH_PASSWORD),
           DB_TEST_EXPECTED_DATABASE: cfg.TEST_DB_NAME,
@@ -607,7 +610,13 @@ const commands = {
     const port = appPort("test");
     const baseURL = `http://127.0.0.1:${port}`;
     const dir = syncAppCopy(cfg, "test");
-    const env = appServerEnv(cfg, "test", port);
+    // Segredos do webhook (E2B-1) fictícios, novos a cada execução: o servidor
+    // confere e os testes assinam com os mesmos valores. Nunca os da Meta.
+    const webhook = {
+      WHATSAPP_APP_SECRET: randomBytes(16).toString("hex"),
+      WHATSAPP_VERIFY_TOKEN: randomBytes(24).toString("base64url"),
+    };
+    const env = appServerEnv(cfg, "test", port, webhook);
     const child = spawn(join(dir, "node_modules", ".bin", "next"), ["dev", "--hostname", "127.0.0.1", "--port", String(port)], {
       cwd: dir,
       stdio: ["ignore", "inherit", "inherit"],
@@ -645,12 +654,14 @@ const commands = {
             AUTH_DATABASE_URL: env.AUTH_DATABASE_URL,
             BETTER_AUTH_URL: env.BETTER_AUTH_URL,
             BETTER_AUTH_SECRET: env.BETTER_AUTH_SECRET,
+            ...webhook,
             SMTP_HOST: env.SMTP_HOST,
             SMTP_PORT: env.SMTP_PORT,
             SMTP_SECURE: env.SMTP_SECURE,
             MAIL_FROM: env.MAIL_FROM,
             DB_TEST_MAILPIT_URL: `http://127.0.0.1:${cfg.MAILPIT_UI_PORT}`,
             APP_DATABASE_URL: testUrl(cfg, "antero_app", cfg.TEST_APP_PASSWORD),
+            WORKER_DATABASE_URL: testUrl(cfg, "antero_worker", cfg.TEST_WORKER_PASSWORD),
             DB_TEST_FIXTURE_URL: testUrl(cfg, "antero_migrator", cfg.TEST_MIGRATOR_PASSWORD),
             DB_TEST_AUTH_URL: testUrl(cfg, "antero_auth", cfg.TEST_AUTH_PASSWORD),
             DB_TEST_EXPECTED_DATABASE: cfg.TEST_DB_NAME,

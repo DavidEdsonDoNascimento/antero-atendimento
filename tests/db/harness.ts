@@ -6,7 +6,7 @@
  * este módulo confirma, no cliente e no servidor, que o alvo é o banco
  * descartável:
  *   - host loopback, porta e nome esperados (nome terminado em `_test`);
- *   - as três URLs (aplicação, fixtures, identidade) apontam para o mesmo banco;
+ *   - as URLs (aplicação, worker, fixtures, identidade) apontam para o mesmo banco;
  *   - no servidor: banco esperado, `fsync = off` e extensão pgTAP — marcas que
  *     só o banco de testes tem (o de desenvolvimento não tem nenhuma das duas).
  * Se qualquer conferência falhar, nada é escrito.
@@ -49,8 +49,10 @@ function assertTestTargets() {
   const fixture = parseTarget("DB_TEST_FIXTURE_URL");
   const auth = parseTarget("DB_TEST_AUTH_URL");
   const identity = parseTarget("AUTH_DATABASE_URL");
+  const worker = parseTarget("WORKER_DATABASE_URL");
   const expectedRoles: [string, Target][] = [
     ["antero_app", app.target],
+    ["antero_worker", worker.target],
     ["antero_migrator", fixture.target],
     ["antero_auth", auth.target],
     ["antero_auth", identity.target],
