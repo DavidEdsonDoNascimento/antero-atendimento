@@ -39,7 +39,9 @@ SELECT set_eq(
     'assert_dev_automation_access(uuid)', 'dev_automation_prepare(uuid)',
     'dev_automation_commit(uuid,uuid,integer,uuid,automation_session_status,text,jsonb,text,jsonb)',
     'dev_automation_record_delivery(uuid,message_delivery_status,text)',
-    'save_automation_media(uuid,text,text,bytea)'
+    'save_automation_media(uuid,text,text,bytea)',
+    'webhook_record_delivery(jsonb)', 'webhook_claim_events(integer,integer)',
+    'webhook_finish_event(bigint,uuid,text,text)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );

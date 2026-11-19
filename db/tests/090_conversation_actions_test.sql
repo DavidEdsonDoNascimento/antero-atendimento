@@ -30,11 +30,11 @@ INSERT INTO public.organization_members (organization_id, user_id, role, status)
   (pg_temp.id('org_a'), pg_temp.id('a_disabled'), 'attendant', 'disabled'),
   (pg_temp.id('org_b'), pg_temp.id('b_owner'), 'owner', 'active');
 
-INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name) VALUES
-  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 090'),
-  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A2 090'),
-  (pg_temp.id('org_a'), 'cloud_api', 'connected', 'Canal A Cloud 090'),
-  (pg_temp.id('org_b'), 'development', 'connected', 'Canal B 090');
+INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, external_business_account_id) VALUES
+  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 090', NULL, NULL),
+  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A2 090', NULL, NULL),
+  (pg_temp.id('org_a'), 'cloud_api', 'connected', 'Canal A Cloud 090', '90900000001', '90909000001'),
+  (pg_temp.id('org_b'), 'development', 'connected', 'Canal B 090', NULL, NULL);
 INSERT INTO ids SELECT 'acc_a', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A 090';
 INSERT INTO ids SELECT 'acc_a2', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A2 090';
 INSERT INTO ids SELECT 'acc_cloud', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A Cloud 090';

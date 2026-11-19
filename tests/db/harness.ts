@@ -76,6 +76,15 @@ function assertTestTargets() {
 
 const targets = assertTestTargets();
 
+/**
+ * Id numérico no formato da Meta (Phone Number ID / WABA), aleatório: os
+ * canais cloud_api exigem ids únicos entre todas as organizações (0014), e os
+ * arquivos de teste rodam no mesmo banco.
+ */
+export function uniqueMetaId(): string {
+  return `9${BigInt(`0x${randomBytes(6).toString("hex")}`).toString().padStart(15, "0")}`;
+}
+
 /** Confirma no servidor que é o banco descartável. Lança se não for. */
 async function confirmDisposableDatabase(client: pg.Client) {
   const { rows } = await client.query(`

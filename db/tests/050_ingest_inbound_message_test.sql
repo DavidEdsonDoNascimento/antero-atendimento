@@ -95,8 +95,8 @@ WITH new_acc AS (
 INSERT INTO ids SELECT 'account_a_inactive', id FROM new_acc;
 
 WITH new_acc AS (
-  INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name)
-  VALUES ((SELECT v FROM ids WHERE k = 'org_a'), 'cloud_api', 'connected', 'Org A Canal Cloud API')
+  INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, external_business_account_id)
+  VALUES ((SELECT v FROM ids WHERE k = 'org_a'), 'cloud_api', 'connected', 'Org A Canal Cloud API', '50500000001', '50509000001')
   RETURNING id
 )
 INSERT INTO ids SELECT 'account_a_cloud', id FROM new_acc;
