@@ -14,6 +14,10 @@ export const PUBLIC_PREFIXES = [
   // Health checks do contêiner/proxy (liveness e readiness): sem login e sem
   // dados — respondem só "ok"/"unavailable" (ver src/lib/health.ts).
   "/api/health",
+  // Webhook da Meta (E2B-1): a Meta não tem sessão; cada notificação é
+  // autenticada pela assinatura HMAC e a verificação pelo verify token
+  // (modules/whatsapp/webhook-handler.ts). Só este caminho, nada de /api/webhooks.
+  "/api/webhooks/whatsapp",
 ];
 
 export function isPublicPath(pathname: string): boolean {

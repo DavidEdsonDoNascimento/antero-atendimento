@@ -15,6 +15,13 @@ test("isPublicPath: plataforma, /sem-organizacao, raiz e prefixos parecidos são
   }
 });
 
+test("isPublicPath: só o webhook do WhatsApp fica público em /api/webhooks", () => {
+  assert.equal(isPublicPath("/api/webhooks/whatsapp"), true);
+  for (const path of ["/api/webhooks", "/api/webhooks/outro", "/api/webhooks/whatsappx", "/api/webhooks/whatsapp-admin", "/api/whatsapp"]) {
+    assert.equal(isPublicPath(path), false, path);
+  }
+});
+
 test("hasSessionCookie: exige o cookie do Better Auth com formato de token assinado", () => {
   const jar = (cookies: Record<string, string>) => (name: string) => cookies[name];
   assert.equal(hasSessionCookie(jar({})), false);
