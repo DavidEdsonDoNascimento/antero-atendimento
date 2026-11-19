@@ -456,7 +456,11 @@ const commands = {
     }
     const cfg = loadConfig();
     const service = target === "dev" ? "migrate-dev" : "migrate-test";
-    run(cfg, ["run", "--rm", "--no-TTY", service, command], { profiles: ["tools", "test"] });
+    // --no-deps: o executor nunca sobe nem RECRIA o banco. Sem ele, uma mudança
+    // no compose (ex.: ANTERO_WORKER_PASSWORD, E2B-1) faria um simples
+    // `db:migrate:status` recriar o contêiner do banco de desenvolvimento. O
+    // banco precisa estar no ar (`pnpm infra:up` / `pnpm db:test:up`).
+    run(cfg, ["run", "--rm", "--no-deps", "--no-TTY", service, command], { profiles: ["tools", "test"] });
   },
 
   // Cria papéis novos e ressincroniza atributos/senhas num banco JÁ

@@ -146,10 +146,11 @@ O papel nasce no `10-roles.sh`, que o PostgreSQL só roda num volume **novo**.
   3. `pnpm db:verify` confere o papel;
   4. `pnpm db:migrate`. Sem o papel, a 0014 recusa com a instrução e não aplica nada.
 
-  O `compose.yaml` passa a declarar `ANTERO_WORKER_PASSWORD`. O próximo
+  O `compose.yaml` passa a declarar `ANTERO_WORKER_PASSWORD`. Por isso o próximo
   `pnpm infra:up` recria o contêiner de desenvolvimento (o volume é preservado),
-  como em qualquer mudança no compose. Para não reiniciar o banco agora, use só
-  `pnpm db:roles`, que não exige isso.
+  como em qualquer mudança no compose. `db:roles`, `db:verify` e `db:migrate`
+  não recriam nem reiniciam o banco: usam `exec` ou `run --no-deps`, e o
+  executor de migrations exige o banco já no ar.
 - **Servidor**: rode o `10-roles.sh` por TCP com `ANTERO_WORKER_PASSWORD` (ver
   `docs/DEPLOY.md`); depois o alvo `migrate`; por fim defina `WORKER_DATABASE_URL`
   na aplicação.
