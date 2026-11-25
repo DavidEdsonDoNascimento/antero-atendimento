@@ -25,6 +25,10 @@ name: antero-atendimentos-homolog
 x-app-environment: &app-environment
   APP_DATABASE_URL: postgres://antero_app:${HOMOLOG_APP_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}
   AUTH_DATABASE_URL: postgres://antero_auth:${HOMOLOG_AUTH_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}
+  WORKER_DATABASE_URL: postgres://antero_worker:${HOMOLOG_WORKER_PASSWORD:?}@db:5432/${HOMOLOG_DB_NAME:?}
+  # Webhook da Meta (E2B-1): segredos FICTÍCIOS da homologação.
+  WHATSAPP_APP_SECRET: ${HOMOLOG_WHATSAPP_APP_SECRET:?}
+  WHATSAPP_VERIFY_TOKEN: ${HOMOLOG_WHATSAPP_VERIFY_TOKEN:?}
   BETTER_AUTH_URL: https://localhost:${HOMOLOG_HTTPS_PORT:?}
   BETTER_AUTH_SECRET: ${HOMOLOG_AUTH_SECRET:?}
   # Somente o Traefik (IP fixo da rede edge): único hop que define X-Forwarded-For.
@@ -71,6 +75,7 @@ services:
       ANTERO_MIGRATOR_PASSWORD: ${HOMOLOG_MIGRATOR_PASSWORD:?}
       ANTERO_APP_PASSWORD: ${HOMOLOG_APP_PASSWORD:?}
       ANTERO_AUTH_PASSWORD: ${HOMOLOG_AUTH_PASSWORD:?}
+      ANTERO_WORKER_PASSWORD: ${HOMOLOG_WORKER_PASSWORD:?}
       ANTERO_ENABLE_PGTAP: "true"
     ports:
       - "127.0.0.1:${HOMOLOG_DB_PORT:?}:5432"
@@ -173,13 +178,16 @@ networks:
   backend:
     name: antero-atendimentos-homolog-backend
     internal: true
-  # Traefik ↔ aplicação. IP do Traefik fixo para AUTH_TRUSTED_PROXIES.
+  # Traefik ↔ aplicação. IP do Traefik fixo para AUTH_TRUSTED_PROXIES; os
+  # endereços dinâmicos (aplicação) saem de outra faixa, senão quem sobe
+  # primeiro pode ocupar o do Traefik.
   edge:
     name: antero-atendimentos-homolog-edge
     internal: true
     ipam:
       config:
         - subnet: 172.29.90.0/24
+          ip_range: 172.29.90.128/25
   # Só para publicar portas em 127.0.0.1 (banco, UI do Mailpit, Traefik, app-e2e).
   hostpub:
     name: antero-atendimentos-homolog-hostpub

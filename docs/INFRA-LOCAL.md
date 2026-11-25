@@ -24,7 +24,8 @@ pnpm install
 pnpm infra:env        # cria .env.infra com senhas aleatórias (nunca sobrescreve;
                       # num arquivo existente só acrescenta senhas que faltam)
 pnpm infra:up         # PostgreSQL de desenvolvimento + Mailpit
-pnpm db:roles         # só para bancos criados antes da Entrega 2: cria antero_auth
+pnpm db:roles         # banco criado antes de um papel novo: cria antero_auth (Entrega 2)
+                      # e antero_worker (E2B-1) sem recriar o contêiner
 pnpm db:migrate       # aplica db/migrations/ no banco de desenvolvimento
 pnpm db:verify        # confere papéis e privilégios do banco de desenvolvimento
 pnpm db:auth-schema   # confere o schema `auth` contra a configuração do Better Auth
@@ -81,6 +82,7 @@ recria o container quando o compose muda, preservando o volume).
 | `antero_migrator` | sim | executa as migrations (dbmate) | ao conectar assume `antero_owner` (`role = antero_owner`), então os objetos nascem com o dono certo; sem superusuário, sem `CREATEROLE`/`CREATEDB` |
 | `antero_app` | sim | conexão da aplicação | sem superusuário, **sem `BYPASSRLS`**, `NOINHERIT`, sem `CREATE`/`TEMP`, não é dono de nada; `CONNECT`, `USAGE` em `public` e `app` e só os privilégios de tabela/função concedidos pelas migrations (sujeitos à RLS). **Sem acesso ao schema `auth`** |
 | `antero_auth` | sim | conexão do Better Auth (a partir da Entrega 5) | mesmas restrições do `antero_app`; `USAGE` só no schema `auth` e `SELECT/INSERT/UPDATE/DELETE` nas 4 tabelas do Better Auth; **nada em `public`**, nenhuma função do projeto, sem `CREATE` em `auth` (migrations do Better Auth nunca rodam em runtime) |
+| `antero_worker` | sim | entrada de sistema: webhook da Meta (E2B-1) e, depois, a varredura | mesmas restrições do `antero_app`; `CONNECT` e `USAGE` em `public`, **nenhum privilégio de tabela**; só `EXECUTE` nas funções `webhook_*` (0014). Ver `docs/WHATSAPP.md` |
 
 Garantias de base:
 
@@ -163,6 +165,7 @@ usuário definido como a aplicação fará (helpers em `db/tests/lib/helpers.psq
 | `090_conversation_actions_test` | assumir, responder, resolver e reabrir (0008), janela de 24 h, `conversation_events` |
 | `120_member_rules_test` | sem escrita direta em vínculos e organizações (0012), garantia de owner ativo, o que continua funcionando |
 | `130_audit_events_test` | auditoria administrativa (0013): eventos, autor, manutenção, contexto forjado, leitura só do admin global, imutabilidade, atomicidade |
+| `140_whatsapp_webhook_test` | webhook da Meta (0014): privilégios do `antero_worker`, regras do canal `cloud_api`, organização só pelo canal registrado, rejeições, duplicidade, fila por prazo |
 
 ## Testes de integração (`src/lib/db` e `modules/*/sql-queries.ts`)
 

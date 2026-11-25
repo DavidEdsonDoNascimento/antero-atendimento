@@ -30,7 +30,7 @@ import {
   listSimulatorContacts,
   simulateInboundMessage,
 } from "../../src/modules/simulator/sql-queries.ts";
-import { connectFixtureClient, createExtraUsers, createFixtures, dropFixtures, rawAppClient, type Fixtures } from "./harness.ts";
+import { connectFixtureClient, createExtraUsers, createFixtures, dropFixtures, rawAppClient, uniqueMetaId, type Fixtures } from "./harness.ts";
 
 let fixture: pg.Client;
 let f: Fixtures;
@@ -73,9 +73,10 @@ before(async () => {
   );
   cloudAccount = (
     await row(
-      `INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name)
-       VALUES ($1, 'cloud_api', 'connected', $2) RETURNING id`,
-      [f.orgA, `Cloud A ${f.suffix}`],
+      `INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, external_business_account_id)
+       VALUES ($1, 'cloud_api', 'connected', $2, $3, $4) RETURNING id`,
+      // Desde a 0014 um canal cloud_api exige Phone Number ID e WABA numéricos e únicos.
+      [f.orgA, `Cloud A ${f.suffix}`, uniqueMetaId(), uniqueMetaId()],
     )
   ).id;
 });

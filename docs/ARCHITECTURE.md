@@ -103,8 +103,9 @@ frontend.
 O provedor de **desenvolvimento** é simulado: mensagens recebidas entram pelo
 simulador (`/simulador`, só em `next dev`) e as respostas saem pelo
 `MessagingProvider` simulado (`modules/messaging`), sem rede nem token. O
-provedor da Cloud API e o webhook real chegam nas próximas entregas (E2B–E2D),
-sem reescrever as regras de atendimento. Ver `docs/ATENDIMENTO.md`.
+provedor da Cloud API chega na E2C. O webhook real já recebe, autentica e guarda
+as notificações da Meta (E2B-1, `docs/WHATSAPP.md`); transformá-las em conversas
+é a E2B-2, sem reescrever as regras de atendimento. Ver `docs/ATENDIMENTO.md`.
 
 As automações (E3A) usam o mesmo caminho: o motor (`modules/automations`) é
 TypeScript puro e só devolve ações (`text`, `image`, `list`); o banco decide

@@ -38,11 +38,11 @@ INSERT INTO public.organization_members (organization_id, user_id, role) VALUES
   (pg_temp.id('org_b'), pg_temp.id('b_owner'), 'owner'),
   (pg_temp.id('org_c'), pg_temp.id('c_owner'), 'owner');
 
-INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name) VALUES
-  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 100'),
-  (pg_temp.id('org_a'), 'cloud_api', 'connected', 'Canal A Cloud 100'),
-  (pg_temp.id('org_b'), 'development', 'connected', 'Canal B 100'),
-  (pg_temp.id('org_c'), 'development', 'connected', 'Canal C 100');
+INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, external_business_account_id) VALUES
+  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 100', NULL, NULL),
+  (pg_temp.id('org_a'), 'cloud_api', 'connected', 'Canal A Cloud 100', '10000000001', '10009000001'),
+  (pg_temp.id('org_b'), 'development', 'connected', 'Canal B 100', NULL, NULL),
+  (pg_temp.id('org_c'), 'development', 'connected', 'Canal C 100', NULL, NULL);
 INSERT INTO ids SELECT 'acc_a', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A 100';
 INSERT INTO ids SELECT 'acc_cloud', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A Cloud 100';
 INSERT INTO ids SELECT 'acc_b', id FROM public.whatsapp_accounts WHERE display_name = 'Canal B 100';
@@ -138,8 +138,8 @@ SELECT tables_are('public', ARRAY[
   'profiles', 'organizations', 'organization_members', 'whatsapp_accounts', 'organization_modules',
   'contacts', 'conversations', 'messages', 'conversation_events', 'schema_migrations',
   'automation_flows', 'automation_flow_versions', 'automation_sessions', 'automation_executions',
-  'automation_media', 'audit_events'
-], 'tabelas de public (as 5 da automação, nenhuma tabela paralela de mensagens; auditoria da G2B)');
+  'automation_media', 'audit_events', 'webhook_events'
+], 'tabelas de public (as 5 da automação, nenhuma tabela paralela de mensagens; auditoria da G2B; eventos brutos da E2B-1)');
 SELECT enum_has_labels('public', 'message_type', ARRAY['text', 'image', 'interactive'], 'tipos de mensagem');
 SELECT ok(
   NOT has_table_privilege('antero_app', 'public.automation_flows', 'INSERT, UPDATE, DELETE')

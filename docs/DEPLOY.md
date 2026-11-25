@@ -73,6 +73,8 @@ Nomes, formatos e regras: `.env.example`, `docs/AUTH.md`, `docs/INFRA-LOCAL.md`.
 | `AUTH_TRUSTED_PROXIES` | **obrigatória** (sem ela a configuração é recusada e a prontidão fica 503): CIDR da rede Docker do Traefik no Coolify (ver abaixo) |
 | `SMTP_HOST/PORT/USER/PASSWORD`, `MAIL_FROM` | SMTP real; em produção, sem `SMTP_SECURE=true`, exige STARTTLS |
 | `APP_DATABASE_*`, `AUTH_DATABASE_*` | tamanhos de pool e timeouts (opcionais) |
+| `WORKER_DATABASE_URL` | webhook da Meta (E2B-1): idem, papel `antero_worker` (só executa funções). Opcional: sem ela o webhook responde 503 e o resto funciona |
+| `WHATSAPP_APP_SECRET`, `WHATSAPP_VERIFY_TOKEN` | webhook da Meta: App Secret do aplicativo e o verify token escolhido (ver `docs/WHATSAPP.md`) |
 
 `PORT`, `HOSTNAME` e `NODE_ENV` já vêm na imagem. **Não definir `NEXT_PUBLIC_*`.**
 A aplicação **nunca** recebe `antero_admin`, `antero_owner` nem
@@ -95,14 +97,18 @@ uma vez, por TCP, com um contêiner descartável na rede do banco (o script é
 docker run --rm --network <rede-do-postgres> \
   -e PGHOST=<host-do-postgres> -e PGPASSWORD=<senha-do-superusuário-do-recurso> \
   -e POSTGRES_USER=<superusuário-do-recurso> -e POSTGRES_DB=<banco> \
-  -e ANTERO_MIGRATOR_PASSWORD=… -e ANTERO_APP_PASSWORD=… -e ANTERO_AUTH_PASSWORD=… \
+  -e ANTERO_MIGRATOR_PASSWORD=… -e ANTERO_APP_PASSWORD=… -e ANTERO_AUTH_PASSWORD=… -e ANTERO_WORKER_PASSWORD=… \
   -v "$PWD/docker/postgres/initdb:/initdb:ro" postgres:17-bookworm bash /initdb/10-roles.sh
 ```
 
 (Validado na Entrega 7A contra o PostgreSQL de homologação, inclusive a
-reexecução.) As senhas dos três papéis são geradas por quem opera o deploy e
+reexecução.) As senhas dos quatro papéis são geradas por quem opera o deploy e
 guardadas no Coolify/gerenciador de segredos; `ANTERO_ENABLE_PGTAP` fica
-ausente (pgTAP só existe no banco de testes).
+ausente (pgTAP só existe no banco de testes). Desde a E2B-1 o script exige
+`ANTERO_WORKER_PASSWORD` (papel `antero_worker`), e a migration 0014 recusa
+rodar sem esse papel: num banco já existente, rode o script de novo **antes**
+de `migrate up` (ele só cria o que falta e ressincroniza senhas). Os comandos
+com `-e SENHA=…` expõem o valor no `ps` do host: passe-os por `--env-file`.
 
 ### Migrations (nunca no start da aplicação)
 

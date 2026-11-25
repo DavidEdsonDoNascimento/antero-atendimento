@@ -2,16 +2,17 @@
 -- Confere os papéis criados por docker/postgres/initdb/10-roles.sh. Não depende
 -- de nenhuma migration. Roda só no banco de testes (`pnpm db:test:pgtap`).
 BEGIN;
-SELECT plan(15);
+SELECT plan(18);
 
 SELECT has_role('antero_owner', 'antero_owner existe');
 SELECT has_role('antero_migrator', 'antero_migrator existe');
 SELECT has_role('antero_app', 'antero_app existe');
 SELECT has_role('antero_auth', 'antero_auth existe');
+SELECT has_role('antero_worker', 'antero_worker existe');
 
 SELECT is(
   (SELECT count(*)::int FROM pg_roles
-   WHERE rolname IN ('antero_owner', 'antero_migrator', 'antero_app', 'antero_auth')
+   WHERE rolname IN ('antero_owner', 'antero_migrator', 'antero_app', 'antero_auth', 'antero_worker')
      AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication)),
   0,
   'nenhum papel do Antero é superusuário/BYPASSRLS/CREATEROLE/CREATEDB/REPLICATION'
@@ -36,9 +37,9 @@ SELECT is(
 );
 
 SELECT is(
-  (SELECT count(*)::int FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname IN ('antero_app', 'antero_auth')),
+  (SELECT count(*)::int FROM pg_class c JOIN pg_roles r ON r.oid = c.relowner WHERE r.rolname IN ('antero_app', 'antero_auth', 'antero_worker')),
   0,
-  'antero_app e antero_auth não possuem objetos'
+  'antero_app, antero_auth e antero_worker não possuem objetos'
 );
 
 SELECT ok(
@@ -65,6 +66,20 @@ SELECT ok(
   NOT has_database_privilege('antero_app', current_database(), 'TEMP')
     AND NOT has_database_privilege('antero_auth', current_database(), 'TEMP'),
   'antero_app e antero_auth não criam tabelas temporárias'
+);
+
+SELECT ok(
+  has_schema_privilege('antero_worker', 'public', 'USAGE')
+    AND NOT has_schema_privilege('antero_worker', 'public', 'CREATE')
+    AND NOT has_database_privilege('antero_worker', current_database(), 'CREATE')
+    AND NOT has_database_privilege('antero_worker', current_database(), 'TEMP'),
+  'antero_worker: só USAGE em public (sem CREATE no schema ou no banco, sem TEMP)'
+);
+
+SELECT is(
+  (SELECT rolinherit FROM pg_roles WHERE rolname = 'antero_worker'),
+  false,
+  'antero_worker é NOINHERIT (não herda privilégios de outro papel)'
 );
 
 SELECT has_extension('pgtap', 'pgtap instalado no banco de testes');

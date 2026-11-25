@@ -57,48 +57,88 @@ function intSetting(name: string, min: number, max: number, fallback: number) {
     .transform((value) => value ?? fallback);
 }
 
-const envSchema = z.object({
-  APP_DATABASE_URL: z
-    .string({ error: "APP_DATABASE_URL é obrigatória." })
-    .min(1, { error: "APP_DATABASE_URL é obrigatória." }),
-  APP_DATABASE_POOL_MAX: intSetting("APP_DATABASE_POOL_MAX", 1, 50, 10),
-  APP_DATABASE_CONNECT_TIMEOUT_MS: intSetting("APP_DATABASE_CONNECT_TIMEOUT_MS", 500, 60_000, 5_000),
-  APP_DATABASE_IDLE_TIMEOUT_MS: intSetting("APP_DATABASE_IDLE_TIMEOUT_MS", 1_000, 600_000, 30_000),
-  APP_DATABASE_STATEMENT_TIMEOUT_MS: intSetting("APP_DATABASE_STATEMENT_TIMEOUT_MS", 100, 300_000, 15_000),
-});
+type DatabaseSpec = {
+  /** Prefixo das variáveis (`APP_DATABASE` → `APP_DATABASE_URL`, `APP_DATABASE_POOL_MAX`…). */
+  name: "APP_DATABASE" | "WORKER_DATABASE";
+  role: string;
+  label: string;
+  defaults: { poolMax: number; connectTimeoutMs: number; idleTimeoutMs: number; statementTimeoutMs: number };
+};
+
+const APP_SPEC: DatabaseSpec = {
+  name: "APP_DATABASE",
+  role: APP_DATABASE_ROLE,
+  label: "Configuração do banco inválida",
+  defaults: { poolMax: 10, connectTimeoutMs: 5_000, idleTimeoutMs: 30_000, statementTimeoutMs: 15_000 },
+};
+
+/**
+ * Pool da ENTRADA DE SISTEMA (webhook da Meta; depois, a varredura da E2B-2).
+ * Mesmas regras da aplicação, outro papel e limites menores:
+ *
+ *   WORKER_DATABASE_URL                    postgres://antero_worker:<senha>@host:porta/banco[?sslmode=…]
+ *   WORKER_DATABASE_POOL_MAX               conexões simultâneas (1–50, padrão 3)
+ *   WORKER_DATABASE_CONNECT_TIMEOUT_MS     espera por conexão (padrão 3000)
+ *   WORKER_DATABASE_IDLE_TIMEOUT_MS        fecha conexão ociosa após (padrão 30000)
+ *   WORKER_DATABASE_STATEMENT_TIMEOUT_MS   limite por comando no servidor (padrão 10000)
+ *
+ * `antero_worker` não tem privilégio de tabela: só executa as funções que as
+ * migrations lhe concedem (0014).
+ */
+export const WORKER_DATABASE_ROLE = "antero_worker";
+
+const WORKER_SPEC: DatabaseSpec = {
+  name: "WORKER_DATABASE",
+  role: WORKER_DATABASE_ROLE,
+  label: "Configuração do banco do worker inválida",
+  defaults: { poolMax: 3, connectTimeoutMs: 3_000, idleTimeoutMs: 30_000, statementTimeoutMs: 10_000 },
+};
+
+function envSchema({ name, defaults }: DatabaseSpec) {
+  return z.object({
+    url: z
+      .string({ error: `${name}_URL é obrigatória.` })
+      .min(1, { error: `${name}_URL é obrigatória.` }),
+    poolMax: intSetting(`${name}_POOL_MAX`, 1, 50, defaults.poolMax),
+    connectTimeoutMs: intSetting(`${name}_CONNECT_TIMEOUT_MS`, 500, 60_000, defaults.connectTimeoutMs),
+    idleTimeoutMs: intSetting(`${name}_IDLE_TIMEOUT_MS`, 1_000, 600_000, defaults.idleTimeoutMs),
+    statementTimeoutMs: intSetting(`${name}_STATEMENT_TIMEOUT_MS`, 100, 300_000, defaults.statementTimeoutMs),
+  });
+}
 
 /**
  * Valida a URL sem nunca incluir a senha (nem a URL) em mensagens de erro.
- * Exige o papel `antero_app`: conectar como dono das tabelas ou superusuário
+ * Exige o papel do pool: conectar como dono das tabelas ou superusuário
  * desligaria a RLS silenciosamente.
  */
-function parseConnectionUrl(raw: string) {
+function parseConnectionUrl(raw: string, { name, role }: DatabaseSpec) {
+  const variable = `${name}_URL`;
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
-    throw new DatabaseConfigError("APP_DATABASE_URL não é uma URL válida.");
+    throw new DatabaseConfigError(`${variable} não é uma URL válida.`);
   }
   if (url.protocol !== "postgres:" && url.protocol !== "postgresql:") {
-    throw new DatabaseConfigError("APP_DATABASE_URL deve usar o esquema postgres://.");
+    throw new DatabaseConfigError(`${variable} deve usar o esquema postgres://.`);
   }
-  if (decodeURIComponent(url.username) !== APP_DATABASE_ROLE) {
-    throw new DatabaseConfigError(`APP_DATABASE_URL deve conectar com o papel ${APP_DATABASE_ROLE}.`);
+  if (decodeURIComponent(url.username) !== role) {
+    throw new DatabaseConfigError(`${variable} deve conectar com o papel ${role}.`);
   }
   if (!url.password) {
-    throw new DatabaseConfigError("APP_DATABASE_URL deve conter a senha do papel.");
+    throw new DatabaseConfigError(`${variable} deve conter a senha do papel.`);
   }
   if (!url.hostname) {
-    throw new DatabaseConfigError("APP_DATABASE_URL deve conter o host.");
+    throw new DatabaseConfigError(`${variable} deve conter o host.`);
   }
   const database = decodeURIComponent(url.pathname.replace(/^\//, ""));
   if (!database || database.includes("/")) {
-    throw new DatabaseConfigError("APP_DATABASE_URL deve conter o nome do banco.");
+    throw new DatabaseConfigError(`${variable} deve conter o nome do banco.`);
   }
   for (const key of url.searchParams.keys()) {
     if (!ALLOWED_URL_PARAMS.has(key)) {
       throw new DatabaseConfigError(
-        `APP_DATABASE_URL: parâmetro "${key}" não é permitido (aceitos: ${[...ALLOWED_URL_PARAMS].join(", ")}).`,
+        `${variable}: parâmetro "${key}" não é permitido (aceitos: ${[...ALLOWED_URL_PARAMS].join(", ")}).`,
       );
     }
   }
@@ -109,28 +149,38 @@ function parseConnectionUrl(raw: string) {
   };
 }
 
-/** Lê e valida a configuração. Lança `DatabaseConfigError` (sem segredos). */
-export function parseAppDatabaseConfig(env: Record<string, string | undefined>): AppDatabaseConfig {
-  const parsed = envSchema.safeParse({
-    APP_DATABASE_URL: env.APP_DATABASE_URL,
-    APP_DATABASE_POOL_MAX: env.APP_DATABASE_POOL_MAX || undefined,
-    APP_DATABASE_CONNECT_TIMEOUT_MS: env.APP_DATABASE_CONNECT_TIMEOUT_MS || undefined,
-    APP_DATABASE_IDLE_TIMEOUT_MS: env.APP_DATABASE_IDLE_TIMEOUT_MS || undefined,
-    APP_DATABASE_STATEMENT_TIMEOUT_MS: env.APP_DATABASE_STATEMENT_TIMEOUT_MS || undefined,
+function parseDatabaseConfig(env: Record<string, string | undefined>, spec: DatabaseSpec): AppDatabaseConfig {
+  const { name } = spec;
+  const parsed = envSchema(spec).safeParse({
+    url: env[`${name}_URL`],
+    poolMax: env[`${name}_POOL_MAX`] || undefined,
+    connectTimeoutMs: env[`${name}_CONNECT_TIMEOUT_MS`] || undefined,
+    idleTimeoutMs: env[`${name}_IDLE_TIMEOUT_MS`] || undefined,
+    statementTimeoutMs: env[`${name}_STATEMENT_TIMEOUT_MS`] || undefined,
   });
   if (!parsed.success) {
     const issues = parsed.error.issues.map((issue) => `- ${issue.message}`).join("\n");
-    throw new DatabaseConfigError(`Configuração do banco inválida:\n${issues}`);
+    throw new DatabaseConfigError(`${spec.label}:\n${issues}`);
   }
   const settings = parsed.data;
-  const target = parseConnectionUrl(settings.APP_DATABASE_URL);
+  const target = parseConnectionUrl(settings.url, spec);
   return {
-    connectionString: settings.APP_DATABASE_URL,
+    connectionString: settings.url,
     ...target,
-    poolMax: settings.APP_DATABASE_POOL_MAX,
-    connectTimeoutMs: settings.APP_DATABASE_CONNECT_TIMEOUT_MS,
-    idleTimeoutMs: settings.APP_DATABASE_IDLE_TIMEOUT_MS,
-    statementTimeoutMs: settings.APP_DATABASE_STATEMENT_TIMEOUT_MS,
+    poolMax: settings.poolMax,
+    connectTimeoutMs: settings.connectTimeoutMs,
+    idleTimeoutMs: settings.idleTimeoutMs,
+    statementTimeoutMs: settings.statementTimeoutMs,
     idleInTransactionTimeoutMs: IDLE_IN_TRANSACTION_TIMEOUT_MS,
   };
+}
+
+/** Lê e valida a configuração. Lança `DatabaseConfigError` (sem segredos). */
+export function parseAppDatabaseConfig(env: Record<string, string | undefined>): AppDatabaseConfig {
+  return parseDatabaseConfig(env, APP_SPEC);
+}
+
+/** Configuração do pool do worker (`antero_worker`). Lança `DatabaseConfigError` (sem segredos). */
+export function parseWorkerDatabaseConfig(env: Record<string, string | undefined>): AppDatabaseConfig {
+  return parseDatabaseConfig(env, WORKER_SPEC);
 }

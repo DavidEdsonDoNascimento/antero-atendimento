@@ -37,9 +37,9 @@ INSERT INTO public.organization_members (organization_id, user_id, role, status)
   (pg_temp.id('org_b'), pg_temp.id('b_owner'), 'owner', 'active'),
   (pg_temp.id('org_b'), pg_temp.id('multi'), 'attendant', 'active');
 
-INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, phone_number) VALUES
-  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 070', 'phone-id-a-070', '+5511900000701'),
-  (pg_temp.id('org_b'), 'cloud_api', 'connected', 'Canal B 070', 'phone-id-b-070', '+5511900000702');
+INSERT INTO public.whatsapp_accounts (organization_id, provider, status, display_name, external_account_id, external_business_account_id, phone_number) VALUES
+  (pg_temp.id('org_a'), 'development', 'connected', 'Canal A 070', 'phone-id-a-070', NULL, '+5511900000701'),
+  (pg_temp.id('org_b'), 'cloud_api', 'connected', 'Canal B 070', '70700000702', '70709000702', '+5511900000702');
 INSERT INTO ids SELECT 'wa_a', id FROM public.whatsapp_accounts WHERE display_name = 'Canal A 070';
 INSERT INTO ids SELECT 'wa_b', id FROM public.whatsapp_accounts WHERE display_name = 'Canal B 070';
 
@@ -91,7 +91,7 @@ SELECT throws_ok($$SELECT pg_temp.does('platform', $q$UPDATE public.organization
 -- ---------------------------------------------------------------------------
 -- whatsapp_accounts: nenhuma escrita direta pela aplicação
 -- ---------------------------------------------------------------------------
-SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET external_account_id = 'phone-id-b-070' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO aponta o canal para o identificador de outra empresa');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET external_account_id = '70700000702' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO aponta o canal para o identificador de outra empresa');
 SELECT throws_ok($$SELECT pg_temp.does('a_admin', $q$UPDATE public.whatsapp_accounts SET external_account_id = 'qualquer' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'admin NÃO altera external_account_id');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET provider = 'cloud_api' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO altera provider');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET status = 'disconnected' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO altera status do canal');
@@ -99,7 +99,7 @@ SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_acco
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET organization_id = {org_b} WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO move o canal de organização');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$UPDATE public.whatsapp_accounts SET display_name = 'Novo' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'owner NÃO altera display_name diretamente');
 SELECT throws_ok($$SELECT pg_temp.does('a_att', $q$UPDATE public.whatsapp_accounts SET external_account_id = 'x' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'atendente NÃO altera o canal');
-SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$INSERT INTO public.whatsapp_accounts (organization_id, provider, status, external_account_id) VALUES ({org_a}, 'cloud_api', 'connected', 'phone-id-b-070')$q$)$$, '42501', NULL, 'owner NÃO cria canal com identificador de outra empresa');
+SELECT throws_ok($$SELECT pg_temp.does('a_owner', $q$INSERT INTO public.whatsapp_accounts (organization_id, provider, status, external_account_id) VALUES ({org_a}, 'cloud_api', 'connected', '70700000702')$q$)$$, '42501', NULL, 'owner NÃO cria canal com identificador de outra empresa');
 SELECT throws_ok($$SELECT pg_temp.does('a_owner', 'DELETE FROM public.whatsapp_accounts WHERE id = {wa_a}')$$, '42501', NULL, 'owner NÃO apaga canal');
 SELECT throws_ok($$SELECT pg_temp.does('platform', $q$UPDATE public.whatsapp_accounts SET external_account_id = 'x' WHERE id = {wa_a}$q$)$$, '42501', NULL, 'admin da plataforma também não grava canal sem operação explícita');
 SELECT is((SELECT external_account_id FROM public.whatsapp_accounts WHERE id = pg_temp.id('wa_a')), 'phone-id-a-070', 'identificador do canal A intacto');

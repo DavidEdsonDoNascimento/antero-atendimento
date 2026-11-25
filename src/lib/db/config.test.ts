@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { parseAppDatabaseConfig } from "./config.ts";
+import { parseAppDatabaseConfig, parseWorkerDatabaseConfig } from "./config.ts";
 import { DatabaseConfigError } from "./errors.ts";
 
 const SECRET = "senha-ficticia-nao-real-123";
@@ -83,4 +83,49 @@ test("config: limites fora da faixa ou não inteiros são rejeitados", () => {
   expectConfigError({ APP_DATABASE_URL: VALID_URL, APP_DATABASE_POOL_MAX: "51" }, /no máximo 50/);
   expectConfigError({ APP_DATABASE_URL: VALID_URL, APP_DATABASE_POOL_MAX: "2.5" }, /inteiro/);
   expectConfigError({ APP_DATABASE_URL: VALID_URL, APP_DATABASE_CONNECT_TIMEOUT_MS: "-1" }, /inteiro/);
+});
+
+const WORKER_URL = `postgres://antero_worker:${SECRET}@127.0.0.1:55434/antero_atendimentos_test`;
+
+function expectWorkerConfigError(env: Record<string, string | undefined>, pattern: RegExp) {
+  assert.throws(
+    () => parseWorkerDatabaseConfig(env),
+    (error: unknown) => {
+      assert.ok(error instanceof DatabaseConfigError);
+      assert.match(error.message, pattern);
+      assert.ok(!error.message.includes(SECRET), "mensagem não pode conter a senha");
+      assert.ok(!error.message.includes("@127.0.0.1"), "mensagem não pode conter a URL");
+      return true;
+    },
+  );
+}
+
+test("config do worker: URL do antero_worker com padrões menores que os da aplicação", () => {
+  const config = parseWorkerDatabaseConfig({ WORKER_DATABASE_URL: WORKER_URL });
+  assert.equal(config.host, "127.0.0.1");
+  assert.equal(config.database, "antero_atendimentos_test");
+  assert.equal(config.poolMax, 3);
+  assert.equal(config.connectTimeoutMs, 3000);
+  assert.equal(config.statementTimeoutMs, 10000);
+  assert.equal(config.idleInTransactionTimeoutMs, 60000);
+});
+
+test("config do worker: variáveis próprias, sem ler as da aplicação", () => {
+  const config = parseWorkerDatabaseConfig({
+    WORKER_DATABASE_URL: WORKER_URL,
+    WORKER_DATABASE_POOL_MAX: "2",
+    APP_DATABASE_POOL_MAX: "40",
+  });
+  assert.equal(config.poolMax, 2);
+  expectWorkerConfigError({ APP_DATABASE_URL: VALID_URL }, /WORKER_DATABASE_URL é obrigatória/);
+  expectWorkerConfigError({ WORKER_DATABASE_URL: WORKER_URL, WORKER_DATABASE_POOL_MAX: "0" }, /WORKER_DATABASE_POOL_MAX deve ser no mínimo 1/);
+});
+
+test("config do worker: só o papel antero_worker (nem a aplicação, nem dono, nem superusuário)", () => {
+  for (const role of ["antero_app", "antero_admin", "antero_owner", "antero_migrator", "antero_auth", "postgres"]) {
+    expectWorkerConfigError({ WORKER_DATABASE_URL: `postgres://${role}:${SECRET}@127.0.0.1:55434/db` }, /papel antero_worker/);
+  }
+  expectWorkerConfigError({ WORKER_DATABASE_URL: `${WORKER_URL}?options=-c%20role%3Dantero_owner` }, /não é permitido/);
+  // E a aplicação continua recusando o papel do worker.
+  expectConfigError({ APP_DATABASE_URL: WORKER_URL }, /papel antero_app/);
 });

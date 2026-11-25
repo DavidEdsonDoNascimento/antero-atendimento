@@ -36,6 +36,7 @@
     "db:test:integration": "node scripts/infra.mjs integration",
     "auth:provision": "node scripts/infra.mjs auth-provision",
     "db:dev-fixtures": "node scripts/infra.mjs dev-fixtures",
+    "whatsapp:channel": "node scripts/infra.mjs whatsapp-channel",
     "app:e2e": "node scripts/infra.mjs app-e2e",
     "app:build": "node scripts/infra.mjs app-build",
     "homolog:env": "node scripts/homolog.mjs env",

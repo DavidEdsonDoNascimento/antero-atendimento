@@ -15,6 +15,8 @@ export {
   type OrganizationContext,
 } from "./organization.ts";
 export { closeAppPool } from "./pool.ts";
+// Entrada de sistema (webhook): papel antero_worker, só funções concedidas (0014).
+export { closeWorkerPool, workerQuery } from "./worker-pool.ts";
 export { pingAppDatabase } from "./health.ts";
 export {
   AccessDeniedError,

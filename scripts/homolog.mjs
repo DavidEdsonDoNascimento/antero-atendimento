@@ -60,6 +60,14 @@ function assertLocalDocker() {
   if (host && !host.startsWith("unix://")) fail(`DOCKER_HOST não local (${host.split("://")[0]}://…). Recusado.`);
 }
 
+// Segredos introduzidos depois da 7A (gerados também num homolog.env antigo).
+// Os do webhook são FICTÍCIOS: a homologação nunca recebe notificações da Meta.
+const LATER_SECRETS = {
+  HOMOLOG_WORKER_PASSWORD: () => randomBytes(18).toString("hex"),
+  HOMOLOG_WHATSAPP_APP_SECRET: () => randomBytes(16).toString("hex"),
+  HOMOLOG_WHATSAPP_VERIFY_TOKEN: () => randomBytes(24).toString("base64url"),
+};
+
 function ensureSecrets() {
   mkdirSync(TLS_DIR, { recursive: true, mode: 0o755 });
   chmodSync(HOMOLOG_DIR, 0o755);
@@ -81,8 +89,19 @@ function ensureSecrets() {
     chmodSync(join(TLS_DIR, "cert.pem"), 0o644);
     console.log("[homolog] certificado autoassinado de homologação criado (fora do repositório).");
   }
-  if (existsSync(ENV_FILE)) return;
   const password = () => randomBytes(18).toString("hex");
+  if (existsSync(ENV_FILE)) {
+    // Segredos criados antes de um papel novo (antero_worker e webhook, E2B-1):
+    // acrescenta só o que falta, sem trocar nenhum valor existente.
+    const added = Object.entries(LATER_SECRETS).filter(([key]) => !parseEnvFile(ENV_FILE)[key]);
+    if (added.length > 0) {
+      const content = readFileSync(ENV_FILE, "utf8").replace(/\n?$/, "\n");
+      writeFileSync(ENV_FILE, content + added.map(([key, make]) => `${key}=${make()}\n`).join(""), { mode: 0o600 });
+      chmodSync(ENV_FILE, 0o600);
+      console.log(`[homolog] segredos acrescentados (${added.map(([key]) => key).join(", ")}); existentes preservados.`);
+    }
+    return;
+  }
   const values = {
     HOMOLOG_DIR,
     HOMOLOG_DB_NAME: "antero_atendimentos_homolog_test",
@@ -90,6 +109,7 @@ function ensureSecrets() {
     HOMOLOG_MIGRATOR_PASSWORD: password(),
     HOMOLOG_APP_PASSWORD: password(),
     HOMOLOG_AUTH_PASSWORD: password(),
+    ...Object.fromEntries(Object.entries(LATER_SECRETS).map(([key, make]) => [key, make()])),
     HOMOLOG_AUTH_SECRET: randomBytes(32).toString("base64url"),
     ...PORTS,
   };
@@ -111,7 +131,7 @@ function loadConfig() {
 function cleanEnv(extra = {}) {
   const env = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (/^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|DB_TEST_|BETTER_AUTH_|AUTH_TRUSTED_|SMTP_|MAIL_|NEXT_|E2E_|HOMOLOG_)/.test(key)) continue;
+    if (/^(COMPOSE_|DBMATE_|PG|APP_DATABASE_|AUTH_DATABASE_|WORKER_DATABASE_|WHATSAPP_|DB_TEST_|BETTER_AUTH_|AUTH_TRUSTED_|SMTP_|MAIL_|NEXT_|E2E_|HOMOLOG_)/.test(key)) continue;
     if (key === "DATABASE_URL" || key === "NODE_OPTIONS" || key === "NODE_ENV") continue;
     env[key] = value;
   }
@@ -151,6 +171,9 @@ function testEnv(cfg) {
     MAIL_FROM: "Antero Atendimento <nao-responda@antero.local>",
     DB_TEST_MAILPIT_URL: `http://127.0.0.1:${cfg.HOMOLOG_MAILPIT_PORT}`,
     APP_DATABASE_URL: url("antero_app", cfg.HOMOLOG_APP_PASSWORD),
+    WORKER_DATABASE_URL: url("antero_worker", cfg.HOMOLOG_WORKER_PASSWORD),
+    WHATSAPP_APP_SECRET: cfg.HOMOLOG_WHATSAPP_APP_SECRET,
+    WHATSAPP_VERIFY_TOKEN: cfg.HOMOLOG_WHATSAPP_VERIFY_TOKEN,
     DB_TEST_FIXTURE_URL: url("antero_migrator", cfg.HOMOLOG_MIGRATOR_PASSWORD),
     DB_TEST_AUTH_URL: url("antero_auth", cfg.HOMOLOG_AUTH_PASSWORD),
     DB_TEST_EXPECTED_DATABASE: cfg.HOMOLOG_DB_NAME,

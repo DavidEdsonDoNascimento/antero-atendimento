@@ -7,14 +7,14 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs" || process.env.NODE_ENV !== "production") return;
 
-  const [{ installGracefulShutdown }, { closeAppPool }, { closeIdentity }] = await Promise.all([
+  const [{ installGracefulShutdown }, { closeAppPool, closeWorkerPool }, { closeIdentity }] = await Promise.all([
     import("./lib/shutdown"),
     import("./lib/db"),
     import("./lib/identity/lifecycle"),
   ]);
   installGracefulShutdown({
     close: async () => {
-      await Promise.all([closeAppPool(), closeIdentity()]);
+      await Promise.all([closeAppPool(), closeWorkerPool(), closeIdentity()]);
     },
   });
 }
