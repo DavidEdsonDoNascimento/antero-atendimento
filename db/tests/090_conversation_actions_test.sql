@@ -68,8 +68,12 @@ INSERT INTO public.conversations (organization_id, whatsapp_account_id, contact_
 SELECT pg_temp.id('org_a'), pg_temp.id('acc_cloud'), id FROM public.contacts WHERE phone_number = '+5511966660007';
 INSERT INTO ids SELECT 'conv_empty', c.id FROM public.conversations c JOIN public.contacts ct ON ct.id = c.contact_id WHERE ct.phone_number = '+5511966660006';
 INSERT INTO ids SELECT 'conv_cloud', c.id FROM public.conversations c JOIN public.contacts ct ON ct.id = c.contact_id WHERE ct.phone_number = '+5511966660007';
-INSERT INTO public.messages (organization_id, conversation_id, whatsapp_account_id, direction, sender_type, content)
-VALUES (pg_temp.id('org_a'), pg_temp.id('conv_cloud'), pg_temp.id('acc_cloud'), 'inbound', 'contact', 'Oi pela Cloud API');
+-- Desde a 0015 a janela de um canal cloud_api só abre com o horário da Meta
+-- (como o webhook grava); sem ele não há janela (150_whatsapp_ingest_test).
+INSERT INTO public.messages (organization_id, conversation_id, whatsapp_account_id, direction, sender_type, content,
+                             provider_message_type, provider_sent_at, webhook_received_at)
+VALUES (pg_temp.id('org_a'), pg_temp.id('conv_cloud'), pg_temp.id('acc_cloud'), 'inbound', 'contact', 'Oi pela Cloud API',
+        'text', now() - interval '1 minute', now());
 
 -- Atalhos: usuário, organização e conversa são CHAVES de ids.
 CREATE FUNCTION pg_temp.claim(p_user text, p_org text, p_conv text) RETURNS boolean
