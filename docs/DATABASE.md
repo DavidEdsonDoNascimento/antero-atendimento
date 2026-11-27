@@ -91,6 +91,14 @@ organização, independente de canal — chave de identidade:
 `(organization_id, phone_number)`. O telefone é normalizado em E.164 pela
 aplicação antes de persistir; o banco valida apenas o formato final.
 
+`whatsapp_user_id` (0015) guarda o BSUID da Meta quando vier, opcional e **sem
+unicidade** (o escopo da Meta é o portfólio empresarial, não a organização). É
+preenchido só quando vazio e nunca usado para unir contatos. Qualquer divergência
+de BSUID (telefone com outro BSUID, BSUID de outro contato) retém a mensagem por
+`identity_conflict` (política conservadora do MVP; pode reter mensagem legítima
+de outro portfólio). Decisão sob travas (canal, wamid) → (organização, telefone)
+→ (organização, BSUID); regras em `docs/WHATSAPP.md`.
+
 ### conversations
 Representa a thread de um contato **em uma conta/canal específico** — não
 apenas por contato. Unicidade permanente em `(organization_id,
@@ -121,6 +129,13 @@ registrada na conversa, não apenas uma conta válida da mesma organização.
 Isso torna desnecessária uma foreign key separada para `whatsapp_accounts`:
 a própria `conversations` já garante (com `ON DELETE RESTRICT`) que seu
 `whatsapp_account_id` aponta para uma conta real da mesma organização.
+
+Recebidas pela Cloud API (0015) guardam a origem, só em `inbound`:
+`provider_message_type` (tipo original da Meta; o `message_type` continua
+`text`), `webhook_received_at` (chegada do webhook), `provider_sent_at` (horário
+da Meta, só quando válido) e `interaction_reply_id` (id da lista/botão). As do
+simulador ficam com os quatro nulos. `UNIQUE (organization_id,
+whatsapp_account_id, id)` é o alvo da FK composta das retenções.
 
 Todas as três tabelas carregam `organization_id` e referenciam sua entidade
 pai por **foreign key composta** — não apenas por RLS. Isso impede
@@ -356,6 +371,8 @@ com o mesmo propósito do lado do webhook real da Meta.
 | `0011_automation_media` | imagens dos fluxos no PostgreSQL, `save_automation_media` | 0010 |
 | `0012_member_rules` | sem escrita direta de `antero_app` em `organization_members` e em `organizations` (INSERT, UPDATE (name), DELETE; privilégios e políticas); gatilho de owner ativo | 0001–0011 |
 | `0013_audit_events` | `audit_events` imutável, gatilhos de auditoria em `organizations`/`organization_modules`, `record_audit_event`, `set_organization_status` sem regravar o mesmo status | 0006, 0007, 0012 |
+| `0014_whatsapp_webhook_events` | canal `cloud_api` (Phone Number ID único, WABA, identidade imutável), `webhook_events`, `webhook_record_delivery`/`webhook_claim_events`/`webhook_finish_event` | 0013, papel `antero_worker` |
+| `0015_whatsapp_inbound_ingest` | `ingest_inbound_internal` (corpo da 0005), `webhook_ingest_message`, `webhook_message_content`, `webhook_hold_copy`, `webhook_message_holds`, colunas de origem em `messages`, `contacts.whatsapp_user_id`, janela de 24 h de `cloud_api` pelo horário da Meta | 0014 |
 
 O banco é construído integralmente do zero por `pnpm db:test:migrate`.
 
@@ -551,10 +568,23 @@ nenhum privilégio de tabela) e as funções `webhook_record_delivery`,
 `webhook_claim_events` e `webhook_finish_event`. O webhook grava em
 `webhook_events` a notificação autenticada, com a organização derivada **só** do
 canal `cloud_api` registrado (Phone Number ID único + WABA conferida). Regras,
-estados e provisionamento: `docs/WHATSAPP.md`. Os itens 2 e 3 abaixo (ingestão
-pelo worker) são a E2B-2.
+estados e provisionamento: `docs/WHATSAPP.md`.
 
-Desenho original (mantido como referência):
+**E2B-2a (0015), já implementado:** os itens 2 e 3 abaixo.
+`webhook_ingest_message(evento, token, wamid)`, só do `antero_worker`, ingere uma
+mensagem de um evento **reivindicado**: organização e canal vêm da linha do
+evento; token, prazo, wamid, canal, organização e módulos são conferidos; a
+gravação é `ingest_inbound_internal`, o mesmo corpo da porta do simulador (que
+manteve as checagens de usuário humano e canal `development`). Mensagens válidas
+que não podem virar conversa com segurança ficam em `webhook_message_holds`
+(RLS sem política, nenhum privilégio para a aplicação): o elemento da mensagem
+até 512 KiB e o do contato até 16 KiB; acima disso, cópia limitada e marcada
+(`*_storage = 'size_limited'`) com tamanho e sha256 do original
+(`webhook_hold_copy`), nunca erro de constraint. Texto acima de 4096 caracteres
+é retido (`content_too_long`), nunca cortado em `messages`. O consumidor da fila e a
+automação pelo worker são a E2B-2b/2c/2d.
+
+Desenho original (mantido como referência; o papel ficou `antero_worker`):
 
 `ingest_inbound_message` continua exigindo um humano `owner`/`admin` ativo
 (é o que o simulador de desenvolvimento usa). A ingestão real da Meta **não**

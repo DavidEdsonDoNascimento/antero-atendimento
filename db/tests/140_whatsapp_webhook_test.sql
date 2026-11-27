@@ -134,8 +134,8 @@ SELECT enum_has_labels('public', 'webhook_event_status', ARRAY['received', 'proc
 SELECT set_eq(
   $$SELECT signature FROM our_functions WHERE has_function_privilege('antero_worker', oid, 'EXECUTE')$$,
   ARRAY['public.webhook_record_delivery(jsonb)', 'public.webhook_claim_events(integer,integer)',
-        'public.webhook_finish_event(bigint,uuid,text,text)'],
-  'antero_worker executa SÓ as três funções do webhook'
+        'public.webhook_finish_event(bigint,uuid,text,text)', 'public.webhook_ingest_message(bigint,uuid,text)'],
+  'antero_worker executa SÓ as quatro funções do webhook (a quarta, de ingestão, é da E2B-2a)'
 );
 SELECT is(
   (SELECT count(*)::int FROM our_functions

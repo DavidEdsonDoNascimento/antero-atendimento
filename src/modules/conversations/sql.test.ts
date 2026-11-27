@@ -96,6 +96,15 @@ test("detalhe: última mensagem RECEBIDA escopada à organização e à conversa
   assert.match(text, /wa\.provider AS channel_provider/);
 });
 
+test("detalhe: janela de canal cloud_api pelo horário válido da Meta, limitado à chegada (0015)", () => {
+  const { text } = buildConversationDetailQuery(orgId, conversationId);
+  assert.match(text, /CASE WHEN wa\.provider = 'cloud_api' THEN/);
+  assert.match(text, /max\(least\(m\.provider_sent_at, m\.webhook_received_at\)\)/);
+  assert.match(text, /AND m\.provider_sent_at IS NOT NULL/);
+  // Os dois ramos continuam presos à organização e à conversa.
+  assert.equal(text.match(/m\.organization_id = c\.organization_id AND m\.conversation_id = c\.id AND m\.direction = 'inbound'/g)?.length, 2);
+});
+
 test("eventos: filtro explícito por organização e conversa, mais recentes primeiro, limite parametrizado", () => {
   const query = buildConversationEventsQuery(orgId, conversationId, 20);
   assert.deepEqual(query.values, [orgId, conversationId, 20]);

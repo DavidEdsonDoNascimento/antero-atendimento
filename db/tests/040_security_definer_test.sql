@@ -41,7 +41,9 @@ SELECT set_eq(
     'dev_automation_record_delivery(uuid,message_delivery_status,text)',
     'save_automation_media(uuid,text,text,bytea)',
     'webhook_record_delivery(jsonb)', 'webhook_claim_events(integer,integer)',
-    'webhook_finish_event(bigint,uuid,text,text)'
+    'webhook_finish_event(bigint,uuid,text,text)',
+    'ingest_inbound_internal(uuid,uuid,text,text,text,text,text,timestamp with time zone,timestamp with time zone,text)',
+    'webhook_ingest_message(bigint,uuid,text)'
   ],
   'conjunto exato de funções SECURITY DEFINER'
 );

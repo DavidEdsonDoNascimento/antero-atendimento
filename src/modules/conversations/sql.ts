@@ -175,18 +175,26 @@ ORDER BY c.last_message_at DESC, c.id DESC`,
 
 /**
  * Detalhe de uma conversa, escopado à organização. Inclui o provedor do canal
- * (mensagens simuladas são identificadas na tela) e a última mensagem RECEBIDA,
- * base da janela de 24 h — a mesma consulta que `send_conversation_reply` faz.
+ * (mensagens simuladas são identificadas na tela) e a base da janela de 24 h —
+ * a mesma regra que `send_conversation_reply` aplica (0015): canal cloud_api,
+ * o maior horário VÁLIDO da Meta das recebidas, limitado à chegada do webhook
+ * (nulo se nenhum: sem janela); outros canais, a última recebida gravada.
  */
 export function buildConversationDetailQuery(organizationId: string, conversationId: string): SqlQuery {
   return {
     text: `
 SELECT ${CONVERSATION_COLUMNS}, c.assigned_at, c.resolved_at,
   wa.provider AS channel_provider,
-  (SELECT m.created_at FROM public.messages m
-   WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.direction = 'inbound'
-   ORDER BY m.created_at DESC, m.id DESC
-   LIMIT 1) AS last_inbound_at
+  CASE WHEN wa.provider = 'cloud_api' THEN
+    (SELECT max(least(m.provider_sent_at, m.webhook_received_at)) FROM public.messages m
+     WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.direction = 'inbound'
+       AND m.provider_sent_at IS NOT NULL)
+  ELSE
+    (SELECT m.created_at FROM public.messages m
+     WHERE m.organization_id = c.organization_id AND m.conversation_id = c.id AND m.direction = 'inbound'
+     ORDER BY m.created_at DESC, m.id DESC
+     LIMIT 1)
+  END AS last_inbound_at
 FROM public.conversations c
 ${CONVERSATION_JOINS}
 WHERE c.organization_id = $1::uuid AND c.id = $2::uuid`,

@@ -59,6 +59,21 @@ cliente — a regra da Cloud API para mensagens fora de template. O banco recusa
 com o próprio relógio (`AT004`); a tela mostra o aviso e desabilita o campo.
 Templates (utilidade/marketing) não fazem parte desta entrega.
 
+De onde vem o "recebida" (0015, E2B-2a), igual no banco e no detalhe da Inbox
+(`last_inbound_at`):
+
+- **canal `cloud_api`:** o maior `least(provider_sent_at, webhook_received_at)`
+  das recebidas com horário **válido** da Meta. A Meta conta a janela pelo
+  horário dela, então uma mensagem processada com atraso não ganha 24 h novas, e
+  um relógio adiantado não passa da chegada do webhook. Recebida sem horário
+  válido (ausente, inválido ou fora de −30 dias/+5 min da chegada) **não abre
+  janela**; se nenhuma tiver, a conversa fica sem janela até a próxima mensagem;
+- **canal `development` (simulador):** como antes, a última recebida por
+  `created_at`.
+
+A ordem da Inbox continua a de chegada (`last_message_at`), não o horário da
+Meta. Regras completas em `docs/WHATSAPP.md`.
+
 ## Envio e provedor
 
 `modules/messaging/provider.ts` define `MessagingProvider.sendText`. O envio tem

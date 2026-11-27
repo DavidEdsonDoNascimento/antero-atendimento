@@ -73,6 +73,12 @@ export type Contact = {
   organization_id: string;
   name: string | null;
   phone_number: string;
+  /**
+   * BSUID da Meta (`user_id`), opcional (0015). Escopo do portfólio
+   * empresarial, não da organização: sem unicidade; gravado só quando o campo
+   * está vazio, nunca sobrescrito. Divergência retém a mensagem (identity_conflict).
+   */
+  whatsapp_user_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -110,7 +116,49 @@ export type Message = {
   payload: unknown | null;
   /** Execução da automação que produziu esta resposta (0010). */
   automation_execution_id: string | null;
+  /** Tipo original da Meta (`messages[].type`) de uma recebida pelo webhook (0015); nulo nas demais. */
+  provider_message_type: string | null;
+  /** Horário da Meta, só quando válido em relação à chegada do webhook (0015). */
+  provider_sent_at: string | null;
+  /** Chegada do webhook (`webhook_events.received_at`) de uma recebida pela Cloud API (0015). */
+  webhook_received_at: string | null;
+  /** Id escolhido numa resposta de lista/botão (`interactive.*_reply.id`, 0015). */
+  interaction_reply_id: string | null;
   created_at: string;
+};
+
+/** Motivo de uma mensagem do webhook retida em vez de ingerida (0015). */
+export type WebhookHoldReason = "missing_phone" | "invalid_phone" | "invalid_content" | "content_too_long" | "identity_conflict";
+export type WebhookHoldStatus = "held" | "resolved" | "discarded";
+/** `complete`: o elemento como veio; `size_limited`: acima do limite, só identificação (incompleto). */
+export type WebhookHoldStorage = "complete" | "size_limited";
+
+/** Mensagem válida do webhook que não pôde virar conversa com segurança (0015). Sem acesso pela aplicação. */
+export type WebhookMessageHold = {
+  id: string;
+  organization_id: string;
+  whatsapp_account_id: string;
+  /** Evento de origem; nulo depois que a retenção de 30 dias dos eventos o remover. */
+  event_id: string | null;
+  wamid: string;
+  reason: WebhookHoldReason;
+  status: WebhookHoldStatus;
+  provider_message_type: string | null;
+  provider_user_id: string | null;
+  provider_sent_at: string | null;
+  webhook_received_at: string;
+  message: unknown;
+  message_storage: WebhookHoldStorage;
+  /** Tamanho (bytes UTF-8) do elemento original, mesmo quando a cópia é limitada. */
+  message_original_bytes: number;
+  /** sha256 do texto canônico (jsonb) do elemento original. */
+  message_sha256: string;
+  contact: unknown | null;
+  contact_storage: WebhookHoldStorage | null;
+  contact_original_bytes: number | null;
+  created_at: string;
+  resolved_at: string | null;
+  resolved_message_id: string | null;
 };
 
 export type ConversationEvent = {

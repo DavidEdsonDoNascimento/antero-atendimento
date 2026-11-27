@@ -77,9 +77,10 @@
    pela porta de desenvolvimento (`dev_automation_*`) e **nunca roda no build de produção**.
 8. **Existe integração real com WhatsApp?** **Parcial.** Existe o **recebimento**: a rota
    `/api/webhooks/whatsapp` valida a assinatura e grava os eventos em `webhook_events`.
-   **Não existe processamento** desses eventos (nenhum consumidor da fila), **nem envio HTTP**
-   para a Cloud API. A migration 0014 está na `main`, mas **não está aplicada no banco de
-   desenvolvimento** (conferido nesta auditoria).
+   **Não existe processamento automático** desses eventos (nenhum consumidor da fila),
+   **nem envio HTTP** para a Cloud API. A 0014 foi **aplicada no banco de desenvolvimento em
+   2026-11-27** (backup, restauração de teste e dados conferidos). A E2B-2a (0015) acrescenta a
+   porta segura de ingestão de uma mensagem reivindicada; ainda sem consumidor da fila.
 9. **Existe chatbot funcional?** Sim, **determinístico** (fluxos e regras, sem IA), funcional
    no simulador e na prévia do editor.
 10. **Funciona com mensagens reais?** **Não.** Uma mensagem real é gravada como evento bruto
@@ -89,14 +90,15 @@
 12. **Principais bloqueadores:** processamento dos eventos (E2B-2), provedor Cloud API
     (E2C-1/E2C-2), envio de imagens do painel (E2C-3), ambiente público com HTTPS (7B),
     caminho de produção para o primeiro administrador, verificação e App Review na Meta.
-13. **Onde paramos?** A E2B-1 (webhook e eventos brutos) foi integrada à `main` hoje
-    (PR #17). O próximo passo do roteiro é a **E2B-2** (ingestão e automação reais a partir
-    da fila).
-14. **Próxima entrega recomendada:** **E2B-2**, precedida da consolidação (aplicar a 0014 no
-    dev com autorização e backup). Ver [Roadmap](#19-roadmap).
-15. **Frentes paralelas para dois desenvolvedores:** (A) comunicação real com o WhatsApp
-    (E2B-2 → E2C-1 → E2C-2 → E2C-3) e (B) produção e operação (retomada da 7B, primeiro
-    administrador, HTTPS público, backup, correção da suíte `homolog:e2e`). Ver
+13. **Onde paramos?** A E2B-1 está na `main` (PR #17) e consolidada no dev (0014 aplicada em
+    2026-11-27). A **E2B-2a** (porta de ingestão, 0015) foi implementada na branch
+    `feat/e2b2a-whatsapp-ingestao` e aguarda homologação manual e PR; a 0015 **está aplicada
+    no dev** (2026-11-27, com backup e restauração conferidos).
+14. **Próxima entrega recomendada:** revisão e integração da E2B-2a; depois **E2B-2b**
+    (automação pela porta do worker, 0016). Ver [Roadmap](#19-roadmap).
+15. **Divisão de trabalho (2026-11-27):** o segundo desenvolvedor (Will) constrói o
+    **aplicativo mobile** em repositório separado, com mocks; a frente web/backend cuida de
+    WhatsApp, automações, banco e infraestrutura (inclusive a 7B). Ver
     [seção 18.6](#186-divisão-recomendada-de-trabalho).
 
 ### Estado por módulo
@@ -113,8 +115,9 @@ Legenda dos estados na [seção 2](#2-como-ler-este-documento).
 | Inbox / Atendimento (E2A) | Implementado, com validação anterior; envio **simulado** | Sem transferência entre atendentes |
 | Motor de automações (E3A) | Implementado, com validação anterior; execução **simulada** | Só porta de desenvolvimento |
 | Editor de fluxos (E3B) | Implementado, com validação anterior | Prévia em memória; sem edição simultânea |
-| Webhook WhatsApp (E2B-1) | Implementado, com validação anterior (testes e homologação com eventos sintéticos) | 0014 não aplicada no dev; nunca recebeu evento real documentado |
-| Processamento de eventos (E2B-2) | Não implementado | Fila existe no banco, sem consumidor |
+| Webhook WhatsApp (E2B-1) | Implementado, com validação anterior (testes e homologação com eventos sintéticos); 0014 aplicada no dev (2026-11-27) | Nunca recebeu evento real documentado |
+| Ingestão de mensagem real (E2B-2a) | Implementado na branch `feat/e2b2a-whatsapp-ingestao` (0015), aguardando homologação manual e PR; 0015 aplicada no dev (2026-11-27) | Só a porta no banco: sem consumidor da fila, sem automação; nunca recebeu mensagem real |
+| Processamento de eventos (E2B-2b/2c/2d) | Não implementado | Fila existe no banco, sem consumidor |
 | Envio pela Cloud API (E2C) | Não implementado | Só formatação pura em `cloud-api.ts` |
 | Contatos (módulo comercial) | Não implementado | Página "Em breve"; só a tabela núcleo `contacts` existe |
 | Campanhas | Não implementado | Página "Em breve"; nenhuma tabela |
@@ -438,7 +441,7 @@ src/
   lib/types/database.ts      tipos do banco
   proxy.ts                   proteção otimista de rotas (substitui o middleware no Next 16)
   instrumentation.ts         encerramento controlado em produção
-db/migrations/               0000–0014 (dbmate), fonte única de migrations
+db/migrations/               0000–0014 na main, 0015 na E2B-2a (dbmate), fonte única de migrations
 db/tests/                    pgTAP
 scripts/                     infra.mjs, homolog.mjs, fixtures, provisionamento, canal WhatsApp
 tests/db, tests/e2e, tests/prod   integração, ponta a ponta e produção
@@ -825,11 +828,11 @@ produção em três camadas (extensão `dev.tsx`, `isSimulatorEnabled`, `.docker
 
 | Operação | Dev hoje | Depende do provedor simulado | Funcionaria com WhatsApp real hoje | Pendente |
 | --- | --- | --- | --- | --- |
-| Receber mensagem | via simulador | não | **não** (evento gravado, não ingerido) | E2B-2 |
+| Receber mensagem | via simulador | não | **não** (evento gravado; a porta de ingestão existe na E2B-2a, sem consumidor) | E2B-2c/2d |
 | Assumir / resolver | sim | não | sim, se a mensagem existisse | — |
 | Responder | sim | **sim** | **não** (`provider_unavailable`) | E2C-2 |
 | Status entregue/lido | não | — | não | E2C-1 |
-| Janela de 24 h | sim (relógio do banco, por `created_at`) | não | parcial (deveria usar o horário da Meta) | E2B-2 |
+| Janela de 24 h | sim (relógio do banco, por `created_at`) | não | sim na E2B-2a: canal `cloud_api` pelo horário válido da Meta, limitado à chegada do webhook | — |
 | Mensagens `pending` presas após queda | sem tratamento | — | — | worker/varredura |
 
 **Pendências conhecidas** ([`ATENDIMENTO.md`](ATENDIMENTO.md)): mensagens `pending` sem
@@ -1029,13 +1032,14 @@ Todas as linhas: **branch `main`** (E2B-1 integrada no PR #17), exceto quando in
 | Verificação GET (`hub.challenge`) | Implementado, validação anterior | `webhook-handler.ts` (`handleVerification`), E2E | `WHATSAPP_VERIFY_TOKEN` | access log do proxy sem query string em produção |
 | Assinatura `X-Hub-Signature-256` | Implementado, validação anterior | `webhook-signature.ts` (HMAC-SHA256, tempo constante) | `WHATSAPP_APP_SECRET` | — |
 | Limite de corpo (3 MB) | Implementado | `webhook-handler.ts` | — | — |
-| Persistência antes do 200 | Implementado, validação anterior | `webhook_record_delivery` (0014), `sql-commands.ts` | `WORKER_DATABASE_URL`, papel `antero_worker` | **0014 aplicada no dev** |
+| Persistência antes do 200 | Implementado, validação anterior | `webhook_record_delivery` (0014), `sql-commands.ts` | `WORKER_DATABASE_URL`, papel `antero_worker` | — (0014 e papel aplicados no dev em 2026-11-27) |
 | Organização pelo canal | Implementado, validação anterior | 0014, pgTAP 140 | canal cadastrado | — |
 | Deduplicação de evento | Implementado, validação anterior | sha256 canônico + WABA, `UNIQUE (dedupe_key)` | — | — |
 | Fila no PostgreSQL | Implementado no banco, **sem uso** | `webhook_claim_events`, `webhook_finish_event` | — | consumidor (E2B-2) |
 | Worker / processamento assíncrono | Não implementado | nenhum chamador de `webhook_claim_events` em `src` | E2B-2 | tudo |
-| Ingestão de mensagem real | Não implementado | `ingest_inbound_message` só aceita `development` | E2B-2 | porta própria, wamid, horário da Meta, BSUID |
-| Tipos recebidos além de texto | Não implementado | constraint `messages_payload_is_bot` | E2B-2 | marcador ou suporte a mídia |
+| Ingestão de mensagem real | Implementado (E2B-2a, branch), sem consumidor | `webhook_ingest_message` (0015): evento reivindicado + token + wamid; organização e canal do evento; dedupe por (canal, wamid); retenções | E2B-2c/2d | chamar pela fila |
+| Tipos recebidos além de texto | Marcador (E2B-2a) | tipo original em `messages.provider_message_type`; lista/botão com `interaction_reply_id`; mídia sem download | E2C/futuro | exibir/baixar mídia |
+| Contato sem telefone (BSUID) | Retido (E2B-2a) | `webhook_message_holds` (`missing_phone`), 90 dias; BSUID opcional em `contacts.whatsapp_user_id` sem unicidade | antes do piloto | contato só por BSUID, recuperação das retenções |
 | Envio de texto | Não implementado (formato pronto) | `toCloudApiMessage`; `providerFor` lança erro | E2C-1, token | HTTP, erros, retentativas |
 | Mensagens interativas (lista) | Não implementado (formato pronto) | `cloud-api.ts` | E2C-1 | envio e `list_reply` (E3C) |
 | Imagem por link | Não implementado (formato pronto) | `cloud-api.ts` | E2C-1 | envio |
@@ -1045,7 +1049,7 @@ Todas as linhas: **branch `main`** (E2B-1 integrada no PR #17), exceto quando in
 | Retentativas de envio | Não implementado | — | E2C-1 | política "no máximo uma vez" proposta |
 | Retentativas de processamento | Implementado no banco | backoff 30 s → 1 h, 10 tentativas → `failed` | E2B-2 | consumidor |
 | Rate limiting de envio | Não implementado | — | E2C/E4 | — |
-| Janela de 24 h | Parcial | `AT004` por `created_at` | E2B-2 | usar horário da Meta |
+| Janela de 24 h | Implementado (E2B-2a, branch) | `AT004`; `cloud_api`: maior `least(provider_sent_at, webhook_received_at)` válido; `development`: `created_at` | — | — |
 | Auditoria do canal | Não implementado | — | — | — |
 | Observabilidade | Parcial | log JSON `whatsapp_webhook` sem dados pessoais | — | métricas, alertas, painel de falhas |
 | Retenção de 30 dias | Apenas documentado | índice parcial `finished_at` | — | rotina de limpeza |
@@ -1160,8 +1164,10 @@ de 2026-11-18.
 | E1B | Módulos por organização | vender por módulo | 0007, `requireModule`, `withModuleTransaction` | Concluído | `feat/modulos-por-organizacao`, PR #8 | sim | pgTAP 080, integração | — |
 | E1C | Administração e equipe | operar clientes sem SQL | **parcial**, via G0–G2C | Parcial | — | — | — | criar organização, convites, primeiro admin em produção |
 | E2A | Inbox funcional e simulador | assumir, responder, resolver | 0008, telas, simulador | Concluído | `feat/inbox-funcional-simulador`, PR #9 | sim | pgTAP 090, integração, E2E | transferência, `pending` presas |
-| E2B-1 | Webhook e eventos brutos | receber e guardar | 0014, rota, `antero_worker`, script de canal | Concluído no código; **0014 não aplicada no dev** | `feat/e2b1-whatsapp-webhook`, PR #17 | sim | unit 250, pgTAP 1031, integração 255, E2E 44 (2026-11-19), homologação 35/35 | aplicar 0014 no dev com autorização |
-| E2B-2 | Ingestão e automação reais | processar a fila | — | **Planejado** | — | — | — | **próxima entrega** |
+| E2B-1 | Webhook e eventos brutos | receber e guardar | 0014, rota, `antero_worker`, script de canal | Concluído; **0014 aplicada no dev em 2026-11-27** (backup e restauração conferidos) | `feat/e2b1-whatsapp-webhook`, PR #17 | sim | unit 250, pgTAP 1031, integração 255, E2E 44 (2026-11-19), homologação 35/35 | — |
+| E2B-2a | Porta segura de ingestão | evento reivindicado → contato, conversa, mensagem; retenções; janela pela Meta | 0015, `webhook_ingest_message`, `ingestWebhookMessage` | **Implementado, aguardando homologação manual e PR**; **0015 aplicada no dev em 2026-11-27** (backup e restauração conferidos) | `feat/e2b2a-whatsapp-ingestao` | não | unit 251, pgTAP 1227, integração 271, E2E 44, build (2026-11-27) | homologação manual, PR |
+| E2B-2b | Automação pela porta do worker | `worker_automation_*`, tipo original, N8 | — (0016 reservada) | Planejado | — | — | — | depende de E2B-2a |
+| E2B-2c/2d | Consumidor da fila | claim → ingestão → finish; `after()` + varredura; shutdown; purga | — | Planejado | — | — | — | depende de E2B-2b |
 | E2C-1 | Provedor Cloud API e status | enviar respostas automáticas | — | Planejado | — | — | — | depende de E2B-2 |
 | E2C-2 | Resposta humana real | Inbox pela Cloud API | — | Planejado | — | — | — | depende de E2C-1 |
 | E2C-3 | Imagens do painel e posse da mídia | upload na Meta, regra no banco | — | Planejado | — | — | — | antes do piloto se houver imagem |
@@ -1248,10 +1254,13 @@ Referência completa: [`DATABASE.md`](DATABASE.md). Migrations em [`db/migration
 | `0012_member_rules` | sem DML direto em vínculos/organizações, owner ativo |
 | `0013_audit_events` | `audit_events` imutável e gatilhos |
 | `0014_whatsapp_webhook_events` | WABA no canal, unicidade do Phone Number ID, `webhook_events`, funções `webhook_*` |
+| `0015_whatsapp_inbound_ingest` (branch E2B-2a) | `webhook_ingest_message`, `ingest_inbound_internal`, `webhook_message_holds`, origem da Meta em `messages`, BSUID em `contacts`, janela de `cloud_api` |
 
-**Schema definido × aplicado:** as migrations definem 0000–0014. No **banco de
-desenvolvimento local**, 0000–0013 estão aplicadas e a **0014 está pendente**
-(`pnpm db:migrate:status`, 2026-11-25). O banco de testes é recriado do zero pelas suítes.
+**Schema definido × aplicado:** na `main`, as migrations definem 0000–0014; a branch da
+E2B-2a acrescenta a 0015. No **banco de desenvolvimento local**, 0000–0015 estão aplicadas
+(0014 e 0015 em 2026-11-27; 16 aplicadas, nenhuma pendente) e `webhook_message_holds` está
+vazia. Depois da primeira mensagem retida ou ingerida pela Cloud API, o rollback da 0015
+no dev passa a ser recusado, por desenho. O banco de testes é recriado do zero pelas suítes.
 **Não existe banco de homologação persistente nem de produção.** O estado dos bancos na
 máquina do outro desenvolvedor será o que ele aplicar.
 
@@ -1485,7 +1494,7 @@ pnpm install
 pnpm infra:env          # cria .env.infra (senhas aleatórias; nunca sobrescreve)
 pnpm env:local          # cria .env.local a partir de .env.infra (inclui WORKER_DATABASE_URL)
 pnpm infra:up           # PostgreSQL de dev + Mailpit
-pnpm db:migrate         # aplica 0000–0014 num volume novo
+pnpm db:migrate         # aplica todas as migrations (0000–0014 na main) num volume novo
 pnpm db:verify          # confere papéis e privilégios
 pnpm db:dev-fixtures    # 2 organizações fictícias, 8 usuários, conversas (senhas aparecem UMA vez)
 pnpm dev                # http://127.0.0.1:3000
@@ -1518,11 +1527,13 @@ compartilhado com outros projetos e o volume do dev seria apagado.
 
 ### 17.4 Banco já existente (desenvolvedor original)
 
-O banco de dev do desenvolvedor original está com a **0014 pendente**. Para aplicá-la, com
-autorização e backup ([`WHATSAPP.md`](WHATSAPP.md), "Provisionamento"):
-`pnpm infra:env` → `pnpm db:roles` → `pnpm db:verify` → `pnpm db:migrate`. Para usar o
-webhook no `next dev`, o `.env.local` precisa de `WORKER_DATABASE_URL`
-(`pnpm env:local --force` faz backup do atual).
+O banco de dev do desenvolvedor original recebeu a 0014 em 2026-11-27, com backup e
+restauração de teste ([`WHATSAPP.md`](WHATSAPP.md), "Provisionamento"):
+`pnpm db:roles` → `pnpm db:verify` → `pnpm db:migrate` (o `infra:env` já não tinha o que
+acrescentar). O `.env.local` ganhou só a linha `WORKER_DATABASE_URL`. **Não use
+`pnpm env:local --force` para isso:** ele regera o `BETTER_AUTH_SECRET` e encerra as
+sessões. O contêiner do dev ainda não tem `ANTERO_WORKER_PASSWORD`, então o próximo
+`pnpm infra:up` o recria (o volume é preservado).
 
 ### 17.5 Problemas comuns
 
@@ -1591,7 +1602,7 @@ Para o desenvolvedor e para o agente dele:
 
 | Área | Regra proposta |
 | --- | --- |
-| **Migrations** | uma por vez em andamento por pessoa; **reservar o número** (ex.: 0015) combinando antes de criar; quem integra depois renumera e reexecuta as suítes; nunca duas branches com o mesmo número |
+| **Migrations** | uma por vez em andamento por pessoa; **reservar o número** combinando antes de criar (reservados em 2026-11-27: 0015 E2B-2a, 0016 E2B-2b, 0017 E2C-1 a confirmar); quem integra depois renumera e reexecuta as suítes; nunca duas branches com o mesmo número |
 | Tipos compartilhados (`lib/types/database.ts`) | alterar junto da migration; conflito resolvido por quem integra depois |
 | Autenticação, `dal.ts`, `lib/db/organization.ts`, `is_org_member`/`has_module` | uma pessoa por vez, com aviso prévio |
 | Contrato `MessagingProvider` (`messaging/provider.ts`) | mudança combinada (usado por Inbox e automações) |
@@ -1620,41 +1631,39 @@ Uma entrega está pronta quando:
 | Atualização de documentação desatualizada × código | mudanças em `is_org_member`/`has_module` (G3) × funções novas do worker: combinar a ordem |
 | Configuração da Meta (E0, sem código) × tudo | 7B mínima antes do piloto (E5) |
 
-### 18.6 Divisão recomendada de trabalho
+### 18.6 Divisão de trabalho (definida em 2026-11-27)
 
-Baseada nas dependências encontradas. **Não atribui frentes a pessoas; a decisão é conjunta.**
+| Quem | Responsabilidade | Onde |
+| --- | --- | --- |
+| **Will** (desenvolvimento mobile) | aplicativo Antero Atendimentos: arquitetura mobile, Design System, navegação, telas de atendimento e, no futuro, carteira e compra de pacotes de mensagens. Trabalha com **mocks** enquanto o backend evolui; **não altera o schema** nesta fase | repositório separado |
+| **Frente web/backend** (desenvolvedor original) | WhatsApp, automações, banco de dados e infraestrutura, inclusive a 7B (Coolify), backup e HTTPS | este repositório |
+| **Decisões compartilhadas** | contratos de API que o app vai consumir (formato, autenticação, versionamento, compatibilidade); modelo de monetização | combinadas antes do código, registradas aqui |
 
-#### Frente A: comunicação real com o WhatsApp
+**Hipótese comercial em avaliação (não aprovada, sem implementação):** cobrança por
+**créditos pré-pagos e pacotes de mensagens**, sem mensalidade obrigatória. Não é requisito,
+não gera tabela, tela nem regra de Billing até decisão explícita.
 
-| Item | Conteúdo |
-| --- | --- |
-| Objetivo | mensagem real entra, a automação responde, o atendente responde, os status chegam |
-| Entregas | E2B-2 → E2C-1 → E2C-2 → E2C-3 (→ E3C) |
-| Arquivos | `db/migrations/0015+`, `src/modules/whatsapp/*`, `src/modules/automations/runner.ts`, `src/modules/messaging/*`, `src/modules/conversations/sql-commands.ts`, `src/instrumentation.ts`, `src/lib/db/worker-pool.ts`, `lib/types/database.ts`, pgTAP 050/090/100/110/140, `tests/db/*` |
-| Dependências | 0014 aplicada; decisões N1–N14 do relatório de 2026-11-18 (fila no processo, `antero_worker`, token em variável, BSUID, mensagem atrasada etc.) |
-| Riscos de conflito | migrations, `database.ts`, `instrumentation.ts` (também usado pelo shutdown), contrato do provedor |
-| Integração | `WORKER_DATABASE_URL` e `WHATSAPP_*` nas variáveis do ambiente da Frente B |
-| Aceite | os da investigação de 2026-11-18 (seções I–K): mensagem real cria conversa na organização do canal, fluxo responde, duplicata não reexecuta, status monotônicos, falha de envio sem reenvio duplicado |
+**Sequência da frente web/backend:**
 
-#### Frente B: produção e operação
+1. **WhatsApp real:** E2B-2a (porta de ingestão, 0015, em revisão) → E2B-2b (automação pelo
+   worker, 0016) → E2B-2c/2d (consumidor da fila, gatilhos, encerramento, purga) → E2C-1
+   (provedor Cloud API e status, 0017 a confirmar) → E2C-2 → E2C-3 (→ E3C). Arquivos:
+   `db/migrations/0015+`, `src/modules/whatsapp/*`, `src/modules/automations/runner.ts`,
+   `src/modules/messaging/*`, `src/modules/conversations/*`, `src/instrumentation.ts`,
+   `src/lib/db/worker-pool.ts`, `lib/types/database.ts`, pgTAP 050/090/100/110/140/150,
+   `tests/db/*`. Aceite: os da investigação de 2026-11-18 (seções I–K) e os de cada subentrega.
+2. **Produção e operação:** integrar o registro da 7B (`feat/coolify-deploy`, só o commit de
+   `DEPLOY.md`); baseline e auditoria local ("A retomar" 1–5); primeiro administrador; backup
+   e restauração testados; `homolog:e2e` (15 falhas conhecidas: origem das Server Actions e
+   testes do simulador); VPS e HTTPS (com autorização); limite de login por conta. Aceite:
+   checklist da 7B em `DEPLOY.md`.
 
-| Item | Conteúdo |
-| --- | --- |
-| Objetivo | ter onde rodar o primeiro piloto com segurança |
-| Entregas | integrar o registro da 7B (`feat/coolify-deploy`); refazer a baseline e a auditoria local ("A retomar" 1–5); caminho do primeiro administrador; backup e restauração testados; corrigir `homolog:e2e`; inspeção da VPS (com autorização); ambiente com HTTPS (homologação mínima ou túnel para instância isolada); decisão sobre limite de login por conta |
-| Arquivos | `docs/DEPLOY.md`, `Dockerfile`, `compose.homolog.yaml`, `scripts/homolog.mjs`, `docker/*`, `tests/prod/*`, `tests/e2e/*` (ajuste de origem), possivelmente um script de bootstrap |
-| Dependências | autorização para acessar a VPS e criar recursos; decisões da lista "A retomar" item 7 |
-| Riscos de conflito | `10-roles.sh` e `compose*.yaml` (combinar); limite por conta mexe em autenticação e exige migration (reservar número) |
-| Integração | entrega à Frente A a URL HTTPS para o teste com o número da Meta |
-| Aceite | checklist da 7B em `DEPLOY.md` (porta não publicada, XFF forjado não burla o limite, HTTPS válido, cookie `__Secure-`, SMTP ponta a ponta, backup restaurado, rollback validado) |
+**Pontos de contato com o app mobile:** quando o app precisar de dados reais, a API dele é
+entrega própria (autenticação de dispositivo, contrato versionado, isolamento por
+organização igual ao da web). Até lá, nenhuma rota é criada para ele.
 
 **Em paralelo, sem código:** configuração na Meta (app, número de teste, system user,
 verificação da empresa) e respostas da Invernada, que podem levar semanas.
-
-**Alternativa para a Frente B,** se a infraestrutura depender de decisões ainda não tomadas:
-completar a administração (E1C restante: criar organização e convidar owner pela tela com
-auditoria; cadastro do canal no painel). Mexe em autenticação e em funções centrais, então
-exige mais coordenação com a Frente A.
 
 ---
 
@@ -1674,8 +1683,8 @@ exige mais coordenação com a Frente A.
 
 #### Fase 1: consolidação
 
-- Aplicar a 0014 no dev do desenvolvedor original (backup + `db:roles` + `db:migrate`, com
-  autorização).
+- ~~Aplicar a 0014 no dev do desenvolvedor original~~ **feito em 2026-11-27** (backup,
+  restauração de teste, `db:roles`, `db:migrate`, dados conferidos por hash).
 - Decidir o destino de `feat/coolify-deploy` (só documentação; integrar ou reaproveitar).
 - Corrigir a documentação desatualizada ([seção 22](#22-divergências-entre-documentação-e-código)).
 - Ajustar `homolog:e2e` (origem das Server Actions; pular testes do simulador na imagem).
